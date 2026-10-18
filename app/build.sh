@@ -11,8 +11,9 @@ mkdir -p dist
   echo '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700;800&display=swap">'
   echo '<style>'; cat src/styles.css; echo '</style>'
   echo '<div id="app"></div><div id="toasts" class="toasts" aria-live="polite"></div>'
+  echo '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>'
   echo '<script>'
-  for f in core seed analysis store charts live views main; do cat "src/$f.js"; echo; done
+  for f in core seed analysis store charts live cloud views main; do cat "src/$f.js"; echo; done
   echo '</script>'
 } > dist/index.html
 {

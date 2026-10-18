@@ -84,7 +84,7 @@ let recTimer = 0, lastRender = 0, camStream = null;
 
 function sessionStart(withActivity) {
   Object.assign(REC, { state: 'session', track: [], start: Date.now(), act: null, acts: [], ranges: [], sessDist: 0, clipList: [], gpsOk: false,
-    shareId: Math.random().toString(36).slice(2, 8), sessionId: uid('ss'), song: DB.settings.conn.spotify ? PLAYLIST[Math.floor(Math.random() * PLAYLIST.length)] : null });
+    shareId: newShareId(), sessionId: uid('ss'), song: DB.settings.conn.spotify ? PLAYLIST[Math.floor(Math.random() * PLAYLIST.length)] : null });
   if (REC.source === 'gps') {
     if (!navigator.geolocation) { toast('Este navegador não dá acesso à localização. A usar o simulador.'); REC.source = 'sim'; }
     else {
@@ -110,7 +110,7 @@ function sessionStart(withActivity) {
   recTimer = setInterval(recTick, 250);
   try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => { }); } catch (e) { }
   if (withActivity) actStart(); else { toast(DB.settings.live.share ? 'Sessão iniciada e partilhada.' : 'Sessão iniciada.'); render(); }
-  publishLive(true);
+  publishLive(true); cloudPushLive(true);
 }
 function pushPoint(p) {
   const last = REC.track[REC.track.length - 1];
@@ -191,7 +191,7 @@ function recTick() {
     if (a && !a.paused) a.moving = (Date.now() - a.startedAt) / 1000 - (a.pausedFor || 0);
     if (REC.track.length) REC.pos = toXY(REC.track[REC.track.length - 1][0], REC.track[REC.track.length - 1][1]);
   }
-  publishLive();
+  publishLive(); cloudPushLive();
   if (Date.now() - (REC.savedAt || 0) > 10000) { REC.savedAt = Date.now(); try { localStorage.setItem('passo.rec', JSON.stringify({ at: Date.now(), track: REC.track.slice(-3000), start: REC.start, act: REC.act, acts: REC.acts, ranges: REC.ranges, sport: REC.sport })); } catch (e) { } }
   if (R.view === 'record' && Date.now() - lastRender > 480) { lastRender = Date.now(); render(); }
   else if (R.view === 'record') { const t = document.getElementById('rs-time'); if (t) t.textContent = fmtDur(a ? a.moving : (Date.now() - REC.start) / 1000 * (REC.source === 'sim' ? REC.speed : 1)); }
@@ -215,7 +215,7 @@ function actFinish(discard) {
   const act0 = createActivity({ sport: a.sport, kind: a.kind, name: a.name, desc: '', start: REC.start + t0 * 1000, track: pts.map((p) => [p[0], p[1], p[2], p[3] - t0, p[4]]),
     laps: a.laps.map((i) => i - a.startIdx).filter((i) => i > 0), visibility: DB.settings.defaultVisibility, gearId: g ? g.id : null, rpe: null, photos: [], hideStats: {},
     sessionId: REC.sessionId, race: a.kind === 'prova' ? { name: a.name, photos: [], certs: [] } : undefined, steps: undefined });
-  REC.acts.push(act0.id);
+  REC.acts.push(act0.id); cloudSaveActivity(act0);
   REC.ranges.push({ kind: 'activity', aid: act0.id, i0: a.startIdx, i1: REC.track.length - 1, label: a.name });
   toast('Atividade guardada na sessão. Podes começar outra.');
   render(); publishLive(true);
@@ -233,7 +233,7 @@ function sessionFinish() {
   if (cur < tr.length - 1) ranges.push({ kind: acts.length ? 'cooldown' : 'warmup', label: acts.length ? 'Depois da atividade' : 'Sessão', i0: cur, i1: tr.length - 1 });
   const step = Math.max(1, Math.floor(tr.length / 4000));
   const sess = { id: REC.sessionId, uid: me(), title: acts.length ? 'Sessão: ' + acts.map((r) => r.label).join(' + ') : 'Sessão sem atividade', start: REC.start, shareId: DB.settings.live.share ? REC.shareId : '', track: step > 1 ? tr.filter((_, i) => i % step === 0) : tr, ranges: step > 1 ? ranges.map((r) => ({ ...r, i0: Math.floor(r.i0 / step), i1: Math.floor(r.i1 / step) })) : ranges };
-  DB.sessions.unshift(sess); save();
+  DB.sessions.unshift(sess); save(); cloudEndLive(); cloudSaveSession(sess);
   REC.state = 'idle'; REC.track = []; REC.act = null;
   publishLive(true);
   toast('Sessão terminada e guardada.');
@@ -312,7 +312,7 @@ const ACTIONS = {
   kudos({ id }) { toggleKudos(id); render(); },
   follow({ id }) { const was = isFollowing(me(), id); toggleFollow(id); toast(was ? `Deixaste de seguir ${user(id).name}.` : `Agora segues ${user(id).name}.`); render(); },
   share({ id }) { copyText(`https://passo.app/a/${id}`); },
-  copyText({ t }) { copyText(t); },
+  copyText({ t }) { copyText(t); }, cloudOut() { cloudSignOut(); },
   copy({ sel }) { const el = document.querySelector(sel); if (el) copyText('https://' + el.textContent); },
   asOthers() { R.asOthers = !R.asOthers; render(); },
   actTab({ tab }) { R.params = { ...R.params, tab }; R.hlSeg = null; render(); },
@@ -366,7 +366,7 @@ const ACTIONS = {
   confirmYes() { const c = R.confirm; R.confirm = null; c && c.fn(); if (!R.confirm) render(); },
   confirmNo() { R.confirm = null; render(); },
   recordRoute({ id }) { const r = DB.routes.find((x) => x.id === id); REC.routeId = id; REC.sport = r.sport; REC.source = 'sim'; navigate('record'); },
-  resumeRec() { const s = R.resumable; if (!s) return; Object.assign(REC, { track: s.track, start: s.start, act: s.act, acts: s.acts || [], ranges: s.ranges || [], sport: s.sport, source: 'sim', sessionId: uid('ss'), shareId: Math.random().toString(36).slice(2, 8), state: 'session', sessDist: 0, clipList: [] }); simInit(); clearInterval(recTimer); recTimer = setInterval(recTick, 250); R.resumable = null; navigate('record'); },
+  resumeRec() { const s = R.resumable; if (!s) return; Object.assign(REC, { track: s.track, start: s.start, act: s.act, acts: s.acts || [], ranges: s.ranges || [], sport: s.sport, source: 'sim', sessionId: uid('ss'), shareId: newShareId(), state: 'session', sessDist: 0, clipList: [] }); simInit(); clearInterval(recTimer); recTimer = setInterval(recTick, 250); R.resumable = null; navigate('record'); },
   dropRec() { try { localStorage.removeItem('passo.rec'); } catch (e) { } R.resumable = null; render(); },
   async exportGpx({ id }) {
     const r = DB.routes.find((x) => x.id === id), gpx = toGPX(r.name, r.sport, densify(r.pts, 25)), filename = r.name.replace(/[^\w\-]+/g, '_') + '.gpx';
@@ -439,7 +439,7 @@ const FORMS = {
   save(fd) {
     const d = REC.pending;
     const a = createActivity({ sport: fd.get('sport'), name: fd.get('name').trim() || d.name, desc: fd.get('desc').trim(), start: d.start, track: d.track, manual: d.manual, laps: d.laps || [], visibility: fd.get('visibility'), gearId: fd.get('gearId') || null, rpe: fd.get('rpe') ? +fd.get('rpe') : null, photos: d.photos || [], hideStats: { pace: !!fd.get('h_pace'), hr: !!fd.get('h_hr'), calories: !!fd.get('h_calories') } });
-    REC.pending = null; R.stack = [{ view: 'feed', params: {} }];
+    REC.pending = null; R.stack = [{ view: 'feed', params: {} }]; cloudSaveActivity(a);
     const effs = analyze(a).hasMap ? effortsFor(a, DB.segments) : [], prs = effs.filter((e) => effortBadges(e).isPR).length;
     toast(prs ? `Atividade guardada. ${prs} ${prs > 1 ? 'recordes pessoais' : 'recorde pessoal'} em segmentos!` : 'Atividade guardada.');
     navigate('activity', { id: a.id }, false);
@@ -488,11 +488,15 @@ const FORMS = {
   },
   race(fd) {
     const key = fd.get('course'), course = coursePts(key), name = fd.get('name').trim() || 'Prova', runners = fd.getAll('runners');
-    if (!runners.length) { toast('Escolhe pelo menos um atleta.'); return; }
+    if (!runners.length && !String(fd.get('links') || '').trim()) { toast('Escolhe pelo menos um atleta.'); return; }
     SIMS.clear();
-    R.race = { name, course: key, speed: 10, ids: runners.map((u, i) => addSim({ uid: u, course, ability: (user(u).ability || 1) * (0.94 + (hashStr(u + name) % 100) / 1000), actName: name, seed: 100 + i })) };
+    const links = String(fd.get('links') || '').split(/\s+/).map(shareFromText).filter(Boolean);
+    if (CLOUD.ok) links.forEach(followShare);
+    R.race = { name, course: key, speed: 10, ids: [...links.map((s) => 'cloud-' + s), ...runners.map((u, i) => addSim({ uid: u, course, ability: (user(u).ability || 1) * (0.94 + (hashStr(u + name) % 100) / 1000), actName: name, seed: 100 + i }))] };
     ensureLiveTimer(); render();
   },
+  cloudIn(fd) { cloudSignIn(fd.get('email').trim(), fd.get('password'), fd.get('mode') === 'create'); },
+  followLink(fd) { const s = shareFromText(fd.get('link') || ''); if (!s) { toast('Esse link não parece um link de partilha do Passo.'); return; } if (!CLOUD.ok) { toast('Sem ligação ao servidor neste ambiente.'); return; } followShare(s); R.liveSel = 'cloud-' + s; toast('A seguir.'); render(); },
   profile(fd) { updateMe({ name: fd.get('name').trim(), city: fd.get('city').trim(), sex: fd.get('sex'), bio: fd.get('bio').trim() }); toast('Perfil guardado.'); render(); },
 };
 
@@ -508,7 +512,7 @@ function bind() {
   document.addEventListener('input', (e) => { const el = e.target; if (el.dataset.input === 'q') { R.q = el.value; render(); } });
   document.addEventListener('submit', (e) => {
     const f = e.target.closest('[data-form]'); if (!f) return;
-    e.preventDefault(); if (FORMS[f.dataset.form]) FORMS[f.dataset.form](new FormData(f), f);
+    e.preventDefault(); if (FORMS[f.dataset.form]) FORMS[f.dataset.form](new FormData(f, e.submitter && e.submitter.form === f && e.submitter.name ? e.submitter : undefined), f);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && R.confirm) { R.confirm = null; render(); } });
   // chart scrubbing
@@ -549,4 +553,5 @@ try { const s = JSON.parse(localStorage.getItem('passo.rec') || 'null'); if (s &
 if (location.hash === '#aovivo') { R.view = 'live'; ensureLiveTimer(); }
 render();
 initRoom();
+cloudInit();
 window.addEventListener('hashchange', () => { if (location.hash === '#aovivo') navigate('live'); });

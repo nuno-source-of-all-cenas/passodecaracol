@@ -464,6 +464,7 @@ button.link.left { display: flex; flex-direction: column; align-items: flex-star
 .conn-ic { width: 40px; height: 40px; border-radius: var(--r-md); background: var(--surface-2); display: grid; place-items: center; flex: none; color: var(--accent); }
 </style>
 <div id="app"></div><div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 /* core.js: helpers, geography, terrain, formatting. No dependencies. */
 'use strict';
@@ -1626,6 +1627,7 @@ const APP_URL = 'https://claude.ai/artifact/YWWo8nGdZsjqCQyLorTM4d';
 function shareUrl() {
   const h = location.hostname || '';
   const hosted = /^https?:$/.test(location.protocol) && h && !/claude|anthropic|localhost|127\.0\.0\.1/.test(h);
+  if (hosted && CLOUD.ok && CLOUD.user) return location.origin + location.pathname + '?s=' + REC.shareId;
   return (hosted ? location.origin + location.pathname : APP_URL) + '#aovivo';
 }
 function whatsappHref(text) { return 'https://wa.me/?text=' + encodeURIComponent(text); }
@@ -1737,6 +1739,7 @@ function liveList() {
   if (REC.state !== 'idle') { const s = liveSnapOwn(false); if (s) out.push({ ...s, mine: true }); }
   PEERS.forEach((e, k) => { if (e.snap) out.push({ ...e.snap, trail: e.trail, peer: k, remote: true }); });
   SIMS.forEach((m) => out.push(simSnap(m)));
+  if (typeof cloudLiveList === 'function') cloudLiveList().forEach((s) => out.push(s));
   return out;
 }
 
@@ -1884,6 +1887,7 @@ function viewLive() {
   if (!list.length) {
     return `${pageHead('Ao vivo', 'Atletas a partilhar a sessão agora', '', false)}
       ${empty('Ninguém está a partilhar agora', 'Quando alguém partilhar uma sessão contigo, aparece aqui o mapa, os indicadores e a música em tempo real.', `<div class="row-gap"><button class="btn btn-primary" data-act="demoLive">${icon('play', 18)}Ver uma demonstração</button><button class="btn btn-secondary" ${go('race')}>${icon('groups', 18)}Seguir vários atletas numa prova</button></div>`)}
+      <form class="card form" data-form="followLink"><h3 class="h-sm">Recebeste um link?</h3><div class="comment-form"><label class="sr" for="follow-link">Link de partilha</label><input id="follow-link" name="link" placeholder="Cola aqui o link que recebeste"><button class="btn btn-primary btn-sm">Seguir</button></div></form>
       <section class="card"><h3 class="h-sm">Como funciona</h3><p class="sm">Quem corre inicia uma <b>sessão</b> na app (por exemplo ao sair de casa) e partilha o link pelo WhatsApp. Quem abre o link vê-o no mapa logo a partir daí: deslocação, aquecimento e depois a atividade, quando ele carregar em iniciar.</p></section>`;
   }
   const sel = list.find((s) => s.id === R.liveSel) || list[0];
@@ -1950,6 +1954,7 @@ function viewRace() {
         <label class="fld"><span>Nome</span><input id="race-name" name="name" required maxlength="60" value="Corrida da Ribeira 10K"></label>
         <label class="fld"><span>Percurso da prova</span><select id="race-course" name="course">${courseOptions().map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
         <fieldset class="fld"><legend>Atletas a seguir</legend><div class="pick-grid">${cand.map((u) => `<label class="pick"><input type="checkbox" name="runners" value="${u}" ${['u1', 'u3', 'u8', 'u5'].includes(u) ? 'checked' : ''}>${avatar(u, 28)}<span>${esc(user(u).name)}</span></label>`).join('')}</div></fieldset>
+        <label class="fld"><span>Links de partilha de atletas reais (um por linha)</span><textarea id="race-links" name="links" rows="2" placeholder="https://…/?s=abc123def4"></textarea></label>
         <p class="muted sm">Na demonstração estes atletas são simulados no percurso. Quem estiver a partilhar uma sessão a sério noutro dispositivo também aparece.</p>
         <div class="form-actions"><button class="btn btn-primary">${icon('play', 18)}Começar a seguir</button></div>
       </form>`;
@@ -2051,7 +2056,7 @@ function trainingSteps() {
 function settingsConnections() {
   const c = DB.settings.conn;
   const row = (id, name, desc, on) => `<div class="conn"><span class="conn-ic">${icon(id === 'samsung' ? 'heart' : id === 'spotify' ? 'play' : 'beacon', 20)}</span><div class="grow"><b>${name}</b><div class="muted sm">${desc}</div></div><label class="switch"><input type="checkbox" id="conn-${id}" ${on ? 'checked' : ''} data-change="conn" data-id="${id}"><span></span><span class="sr">${name}</span></label></div>`;
-  return `<section class="card form"><h3 class="h-sm">Ligações</h3>
+  return `${settingsCloud()}<section class="card form"><h3 class="h-sm">Ligações</h3>
     ${row('samsung', 'Samsung Health', c.samsung ? 'Ligado (dados de demonstração). Passos diários dos últimos 60 dias.' : 'Passos diários e frequência cardíaca do Galaxy Watch.', c.samsung)}
     ${row('spotify', 'Música a tocar', c.spotify ? 'Ligado (demonstração). A música aparece na partilha ao vivo.' : 'Mostra a quem te segue ao vivo a música que estás a ouvir.', c.spotify)}
     <div class="conn"><span class="conn-ic">${icon('heart', 20)}</span><div class="grow"><b>Sensor de frequência cardíaca</b><div class="muted sm">${REC.hrDevice ? 'Ligado: ' + esc(REC.hrDevice) : 'Cintas e relógios com Bluetooth (no Chrome do Android ou do computador).'}</div></div><button class="btn btn-secondary btn-sm" data-act="hrConnect">${REC.hrDevice ? 'Religar' : 'Ligar'}</button></div>
@@ -2088,6 +2093,121 @@ function raceFields(a) {
     <div class="fld"><span class="fld-l">Fotos oficiais</span><div class="photo-row" id="race-photo-row">${(R.draftRace.photos || []).map((p, i) => `<span class="ph"><img src="${p}" alt=""><button type="button" class="icon-btn sm" ${act('rmRacePhoto', { i })} aria-label="Remover foto">${icon('close', 14)}</button></span>`).join('')}<label class="ph-add">${icon('camera')}<span>Adicionar</span><input type="file" id="f-rphoto" accept="image/*" multiple data-change="racePhoto"></label></div></div>
     <div class="fld"><span class="fld-l">Certificados e diplomas (imagem ou PDF, até 1,5 MB)</span><div class="cert-row" id="race-cert-row">${(R.draftRace.certs || []).map((c, i) => `<span class="cert-chip">${icon('medal', 14)}${esc(c.name)}<button type="button" class="icon-btn sm" ${act('rmCert', { i })} aria-label="Remover">${icon('close', 12)}</button></span>`).join('')}<label class="btn btn-secondary btn-sm file-btn">${icon('plus', 14)}Adicionar ficheiro<input type="file" id="f-cert" accept="image/*,application/pdf" multiple data-change="raceCert"></label></div></div>
   </fieldset>`;
+}
+
+/* cloud.js: the Supabase backend (schema "passo"). Optional: when the client
+   library or the network is missing (the Claude preview, offline) the app
+   keeps working on this device only. */
+'use strict';
+
+const CLOUD = {
+  url: 'https://zwiemchpxxldfsubfybm.supabase.co',
+  key: 'sb_publishable_FhLUxglWVZMoQL-9sav8mg_SEzx51-f',   // publishable: safe in the browser, RLS does the rest
+  sb: null, user: null, ok: false, signupOpen: false,
+  pushed: 0, pushedShare: '', remote: new Map(),         // share id -> {snap, trail, name, ended}
+};
+
+function cloudDb() { return CLOUD.sb.schema('passo'); }
+async function cloudInit() {
+  if (!window.supabase || !window.supabase.createClient) return;
+  try {
+    CLOUD.sb = window.supabase.createClient(CLOUD.url, CLOUD.key, { auth: { persistSession: true, autoRefreshToken: true } });
+    const { data } = await CLOUD.sb.auth.getSession();
+    CLOUD.user = data.session ? data.session.user : null;
+    CLOUD.ok = true;
+    CLOUD.sb.auth.onAuthStateChange((_e, s) => { CLOUD.user = s ? s.user : null; if (CLOUD.user) ensureAthlete(); render(); });
+    if (CLOUD.user) ensureAthlete();
+    const share = new URLSearchParams(location.search).get('s');
+    if (share && /^[a-z0-9]{6,24}$/.test(share)) { followShare(share); R.liveSel = 'cloud-' + share; navigate('live', {}, false); }
+  } catch (e) { CLOUD.ok = false; }
+}
+async function ensureAthlete() {
+  const u = user(me());
+  const { error } = await cloudDb().from('athletes').upsert({ id: CLOUD.user.id, name: u.name || CLOUD.user.email.split('@')[0], sex: u.sex || null, city: u.city || null }, { onConflict: 'id', ignoreDuplicates: true });
+  if (error) console.warn('athlete', error.message);
+}
+async function cloudSignIn(email, password, create) {
+  if (!CLOUD.ok) { toast('Sem ligação ao servidor.'); return; }
+  if (create && !CLOUD.signupOpen) { toast('Os registos ainda estão fechados.'); return; }
+  const fn = create ? CLOUD.sb.auth.signUp({ email, password, options: { data: { app: 'passo' } } }) : CLOUD.sb.auth.signInWithPassword({ email, password });
+  const { error, data } = await fn;
+  if (error) { toast(error.message); return; }
+  toast(create && !data.session ? 'Conta criada. Confirma o email para entrar.' : 'Sessão iniciada.');
+}
+async function cloudSignOut() { if (CLOUD.ok) await CLOUD.sb.auth.signOut(); toast('Saíste da conta.'); }
+function newShareId() { const a = new Uint8Array(10); crypto.getRandomValues(a); return [...a].map((b) => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join(''); }
+
+/* ---------- live: runner side ---------- */
+let _cloudPushAt = 0;
+async function cloudPushLive(force) {
+  if (!CLOUD.ok || !CLOUD.user || REC.state === 'idle' || !DB.settings.live.share) return;
+  if (!force && Date.now() - _cloudPushAt < 3000) return;
+  _cloudPushAt = Date.now();
+  if (CLOUD.pushedShare !== REC.shareId) { CLOUD.pushedShare = REC.shareId; CLOUD.pushed = 0; }
+  const snap = liveSnapOwn(true); if (!snap) return;
+  delete snap.trail;
+  const pts = REC.track.slice(CLOUD.pushed, CLOUD.pushed + 400).map((p) => [+p[0].toFixed(5), +p[1].toFixed(5), p[3], p[4] || 0]);
+  const { error } = await cloudDb().rpc('push_live', { p_share: REC.shareId, p_session: null, p_snap: snap, p_points: pts });
+  if (!error) CLOUD.pushed += pts.length;
+}
+async function cloudEndLive() { if (CLOUD.ok && CLOUD.user && CLOUD.pushedShare) await cloudDb().rpc('end_live', { p_share: CLOUD.pushedShare }); }
+
+/* ---------- live: viewer side (no account needed) ---------- */
+const _follow = new Map();
+function followShare(share) {
+  if (!CLOUD.ok || _follow.has(share)) return;
+  const st = { since: -1, timer: 0 };
+  _follow.set(share, st);
+  const poll = async () => {
+    const { data, error } = await cloudDb().rpc('get_live', { p_share: share, p_since: st.since });
+    if (!error && data) {
+      const cur = CLOUD.remote.get(share) || { trail: [] };
+      (data.trail || []).forEach((p) => cur.trail.push(p));
+      if (cur.trail.length) st.since = cur.trail[cur.trail.length - 1][2];
+      Object.assign(cur, { snap: data.snap || {}, name: data.name, ended: data.ended });
+      CLOUD.remote.set(share, cur);
+      liveRerender();
+    } else if (!error && !data) { CLOUD.remote.delete(share); }
+    st.timer = setTimeout(poll, CLOUD.remote.get(share)?.ended ? 30000 : 3000);
+  };
+  poll();
+  ensureLiveTimer();
+}
+function shareFromText(t) { const m = String(t).match(/[?&]s=([a-z0-9]{6,24})/) || String(t).match(/^([a-z0-9]{6,24})$/); return m ? m[1] : null; }
+function cloudLiveList() {
+  const out = [];
+  CLOUD.remote.forEach((e, share) => out.push({ ...e.snap, id: 'cloud-' + share, uid: null, name: e.name || e.snap.name, trail: e.trail, remote: true, done: e.ended }));
+  return out;
+}
+
+/* ---------- copy to the cloud after saving ---------- */
+async function cloudSaveActivity(a) {
+  if (!CLOUD.ok || !CLOUD.user) return;
+  const an = analyze(a), st = activitySteps(a);
+  a.remoteId = a.remoteId || crypto.randomUUID();
+  const row = { id: a.remoteId, athlete_id: CLOUD.user.id, session_id: a.sessionRemoteId || null, sport: a.sport, kind: a.kind === 'prova' ? 'prova' : 'treino', name: a.name, description: a.desc || null,
+    start_at: new Date(a.start).toISOString(), distance_m: Math.round(an.dist), moving_time_s: Math.round(an.moving), elapsed_time_s: Math.max(Math.round(an.elapsed), Math.round(an.moving)), elevation_gain_m: Math.round(an.gain),
+    avg_hr: an.avgHr || null, max_hr: an.maxHr || null, calories: an.calories, relative_effort: an.effort, steps: st ? st.steps : null, perceived_exertion: a.rpe || null,
+    visibility: a.visibility, hide_stats: a.hideStats || {}, track: a.track || null, laps: a.laps || [], race: a.race ? { ...a.race, photos: undefined, certs: undefined } : null };
+  const { error } = await cloudDb().from('activities').upsert(row);
+  if (error) console.warn('activity', error.message); else save();
+}
+async function cloudSaveSession(sess) {
+  if (!CLOUD.ok || !CLOUD.user) return;
+  sess.remoteId = sess.remoteId || crypto.randomUUID();
+  const { error } = await cloudDb().from('sessions').upsert({ id: sess.remoteId, athlete_id: CLOUD.user.id, title: sess.title, start_at: new Date(sess.start).toISOString(), end_at: new Date().toISOString(),
+    share_id: sess.shareId && /^[a-z0-9]{6,24}$/.test(sess.shareId) ? sess.shareId : null, track: sess.track, ranges: sess.ranges });
+  if (error) { console.warn('session', error.message); return; }
+  for (const r of sess.ranges.filter((x) => x.aid)) { const a = activity(r.aid); if (a) { a.sessionRemoteId = sess.remoteId; await cloudSaveActivity(a); } }
+  save();
+}
+
+function settingsCloud() {
+  if (!CLOUD.ok) return `<section class="card form"><h3 class="h-sm">Conta na nuvem</h3><p class="muted sm">Sem ligação ao servidor neste ambiente. Os teus dados ficam só neste navegador. A partilha por link e a cópia para a nuvem funcionam na app publicada no teu domínio.</p></section>`;
+  if (CLOUD.user) return `<section class="card form"><h3 class="h-sm">Conta na nuvem</h3><p class="sm">Entraste como <b>${esc(CLOUD.user.email)}</b>. As novas atividades e sessões são copiadas para a nuvem, e a partilha ao vivo funciona para qualquer pessoa com o link.</p><div class="rb-btns"><button class="btn btn-secondary btn-sm" data-act="cloudOut">Sair</button></div></section>`;
+  return `<form class="card form" data-form="cloudIn"><h3 class="h-sm">Conta na nuvem</h3><p class="muted sm">Entra para guardares as atividades na nuvem e partilhares a sessão por link com quem quiseres.</p>
+    <div class="form-grid"><label class="fld"><span>Email</span><input id="cl-email" name="email" type="email" required autocomplete="email"></label><label class="fld"><span>Palavra-passe</span><input id="cl-pass" name="password" type="password" required minlength="8" autocomplete="current-password"></label></div>
+    <div class="form-actions"><button class="btn btn-ghost btn-sm" type="submit" name="mode" value="create" ${CLOUD.signupOpen ? '' : 'disabled title="Registos fechados por agora"'}>Criar conta</button><button class="btn btn-primary btn-sm" type="submit" name="mode" value="in">Entrar</button></div></form>`;
 }
 
 /* views.js: every screen, as HTML strings. IDs match replica/recon.md. */
@@ -2942,7 +3062,7 @@ let recTimer = 0, lastRender = 0, camStream = null;
 
 function sessionStart(withActivity) {
   Object.assign(REC, { state: 'session', track: [], start: Date.now(), act: null, acts: [], ranges: [], sessDist: 0, clipList: [], gpsOk: false,
-    shareId: Math.random().toString(36).slice(2, 8), sessionId: uid('ss'), song: DB.settings.conn.spotify ? PLAYLIST[Math.floor(Math.random() * PLAYLIST.length)] : null });
+    shareId: newShareId(), sessionId: uid('ss'), song: DB.settings.conn.spotify ? PLAYLIST[Math.floor(Math.random() * PLAYLIST.length)] : null });
   if (REC.source === 'gps') {
     if (!navigator.geolocation) { toast('Este navegador não dá acesso à localização. A usar o simulador.'); REC.source = 'sim'; }
     else {
@@ -2968,7 +3088,7 @@ function sessionStart(withActivity) {
   recTimer = setInterval(recTick, 250);
   try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => { }); } catch (e) { }
   if (withActivity) actStart(); else { toast(DB.settings.live.share ? 'Sessão iniciada e partilhada.' : 'Sessão iniciada.'); render(); }
-  publishLive(true);
+  publishLive(true); cloudPushLive(true);
 }
 function pushPoint(p) {
   const last = REC.track[REC.track.length - 1];
@@ -3049,7 +3169,7 @@ function recTick() {
     if (a && !a.paused) a.moving = (Date.now() - a.startedAt) / 1000 - (a.pausedFor || 0);
     if (REC.track.length) REC.pos = toXY(REC.track[REC.track.length - 1][0], REC.track[REC.track.length - 1][1]);
   }
-  publishLive();
+  publishLive(); cloudPushLive();
   if (Date.now() - (REC.savedAt || 0) > 10000) { REC.savedAt = Date.now(); try { localStorage.setItem('passo.rec', JSON.stringify({ at: Date.now(), track: REC.track.slice(-3000), start: REC.start, act: REC.act, acts: REC.acts, ranges: REC.ranges, sport: REC.sport })); } catch (e) { } }
   if (R.view === 'record' && Date.now() - lastRender > 480) { lastRender = Date.now(); render(); }
   else if (R.view === 'record') { const t = document.getElementById('rs-time'); if (t) t.textContent = fmtDur(a ? a.moving : (Date.now() - REC.start) / 1000 * (REC.source === 'sim' ? REC.speed : 1)); }
@@ -3073,7 +3193,7 @@ function actFinish(discard) {
   const act0 = createActivity({ sport: a.sport, kind: a.kind, name: a.name, desc: '', start: REC.start + t0 * 1000, track: pts.map((p) => [p[0], p[1], p[2], p[3] - t0, p[4]]),
     laps: a.laps.map((i) => i - a.startIdx).filter((i) => i > 0), visibility: DB.settings.defaultVisibility, gearId: g ? g.id : null, rpe: null, photos: [], hideStats: {},
     sessionId: REC.sessionId, race: a.kind === 'prova' ? { name: a.name, photos: [], certs: [] } : undefined, steps: undefined });
-  REC.acts.push(act0.id);
+  REC.acts.push(act0.id); cloudSaveActivity(act0);
   REC.ranges.push({ kind: 'activity', aid: act0.id, i0: a.startIdx, i1: REC.track.length - 1, label: a.name });
   toast('Atividade guardada na sessão. Podes começar outra.');
   render(); publishLive(true);
@@ -3091,7 +3211,7 @@ function sessionFinish() {
   if (cur < tr.length - 1) ranges.push({ kind: acts.length ? 'cooldown' : 'warmup', label: acts.length ? 'Depois da atividade' : 'Sessão', i0: cur, i1: tr.length - 1 });
   const step = Math.max(1, Math.floor(tr.length / 4000));
   const sess = { id: REC.sessionId, uid: me(), title: acts.length ? 'Sessão: ' + acts.map((r) => r.label).join(' + ') : 'Sessão sem atividade', start: REC.start, shareId: DB.settings.live.share ? REC.shareId : '', track: step > 1 ? tr.filter((_, i) => i % step === 0) : tr, ranges: step > 1 ? ranges.map((r) => ({ ...r, i0: Math.floor(r.i0 / step), i1: Math.floor(r.i1 / step) })) : ranges };
-  DB.sessions.unshift(sess); save();
+  DB.sessions.unshift(sess); save(); cloudEndLive(); cloudSaveSession(sess);
   REC.state = 'idle'; REC.track = []; REC.act = null;
   publishLive(true);
   toast('Sessão terminada e guardada.');
@@ -3170,7 +3290,7 @@ const ACTIONS = {
   kudos({ id }) { toggleKudos(id); render(); },
   follow({ id }) { const was = isFollowing(me(), id); toggleFollow(id); toast(was ? `Deixaste de seguir ${user(id).name}.` : `Agora segues ${user(id).name}.`); render(); },
   share({ id }) { copyText(`https://passo.app/a/${id}`); },
-  copyText({ t }) { copyText(t); },
+  copyText({ t }) { copyText(t); }, cloudOut() { cloudSignOut(); },
   copy({ sel }) { const el = document.querySelector(sel); if (el) copyText('https://' + el.textContent); },
   asOthers() { R.asOthers = !R.asOthers; render(); },
   actTab({ tab }) { R.params = { ...R.params, tab }; R.hlSeg = null; render(); },
@@ -3224,7 +3344,7 @@ const ACTIONS = {
   confirmYes() { const c = R.confirm; R.confirm = null; c && c.fn(); if (!R.confirm) render(); },
   confirmNo() { R.confirm = null; render(); },
   recordRoute({ id }) { const r = DB.routes.find((x) => x.id === id); REC.routeId = id; REC.sport = r.sport; REC.source = 'sim'; navigate('record'); },
-  resumeRec() { const s = R.resumable; if (!s) return; Object.assign(REC, { track: s.track, start: s.start, act: s.act, acts: s.acts || [], ranges: s.ranges || [], sport: s.sport, source: 'sim', sessionId: uid('ss'), shareId: Math.random().toString(36).slice(2, 8), state: 'session', sessDist: 0, clipList: [] }); simInit(); clearInterval(recTimer); recTimer = setInterval(recTick, 250); R.resumable = null; navigate('record'); },
+  resumeRec() { const s = R.resumable; if (!s) return; Object.assign(REC, { track: s.track, start: s.start, act: s.act, acts: s.acts || [], ranges: s.ranges || [], sport: s.sport, source: 'sim', sessionId: uid('ss'), shareId: newShareId(), state: 'session', sessDist: 0, clipList: [] }); simInit(); clearInterval(recTimer); recTimer = setInterval(recTick, 250); R.resumable = null; navigate('record'); },
   dropRec() { try { localStorage.removeItem('passo.rec'); } catch (e) { } R.resumable = null; render(); },
   async exportGpx({ id }) {
     const r = DB.routes.find((x) => x.id === id), gpx = toGPX(r.name, r.sport, densify(r.pts, 25)), filename = r.name.replace(/[^\w\-]+/g, '_') + '.gpx';
@@ -3297,7 +3417,7 @@ const FORMS = {
   save(fd) {
     const d = REC.pending;
     const a = createActivity({ sport: fd.get('sport'), name: fd.get('name').trim() || d.name, desc: fd.get('desc').trim(), start: d.start, track: d.track, manual: d.manual, laps: d.laps || [], visibility: fd.get('visibility'), gearId: fd.get('gearId') || null, rpe: fd.get('rpe') ? +fd.get('rpe') : null, photos: d.photos || [], hideStats: { pace: !!fd.get('h_pace'), hr: !!fd.get('h_hr'), calories: !!fd.get('h_calories') } });
-    REC.pending = null; R.stack = [{ view: 'feed', params: {} }];
+    REC.pending = null; R.stack = [{ view: 'feed', params: {} }]; cloudSaveActivity(a);
     const effs = analyze(a).hasMap ? effortsFor(a, DB.segments) : [], prs = effs.filter((e) => effortBadges(e).isPR).length;
     toast(prs ? `Atividade guardada. ${prs} ${prs > 1 ? 'recordes pessoais' : 'recorde pessoal'} em segmentos!` : 'Atividade guardada.');
     navigate('activity', { id: a.id }, false);
@@ -3346,11 +3466,15 @@ const FORMS = {
   },
   race(fd) {
     const key = fd.get('course'), course = coursePts(key), name = fd.get('name').trim() || 'Prova', runners = fd.getAll('runners');
-    if (!runners.length) { toast('Escolhe pelo menos um atleta.'); return; }
+    if (!runners.length && !String(fd.get('links') || '').trim()) { toast('Escolhe pelo menos um atleta.'); return; }
     SIMS.clear();
-    R.race = { name, course: key, speed: 10, ids: runners.map((u, i) => addSim({ uid: u, course, ability: (user(u).ability || 1) * (0.94 + (hashStr(u + name) % 100) / 1000), actName: name, seed: 100 + i })) };
+    const links = String(fd.get('links') || '').split(/\s+/).map(shareFromText).filter(Boolean);
+    if (CLOUD.ok) links.forEach(followShare);
+    R.race = { name, course: key, speed: 10, ids: [...links.map((s) => 'cloud-' + s), ...runners.map((u, i) => addSim({ uid: u, course, ability: (user(u).ability || 1) * (0.94 + (hashStr(u + name) % 100) / 1000), actName: name, seed: 100 + i }))] };
     ensureLiveTimer(); render();
   },
+  cloudIn(fd) { cloudSignIn(fd.get('email').trim(), fd.get('password'), fd.get('mode') === 'create'); },
+  followLink(fd) { const s = shareFromText(fd.get('link') || ''); if (!s) { toast('Esse link não parece um link de partilha do Passo.'); return; } if (!CLOUD.ok) { toast('Sem ligação ao servidor neste ambiente.'); return; } followShare(s); R.liveSel = 'cloud-' + s; toast('A seguir.'); render(); },
   profile(fd) { updateMe({ name: fd.get('name').trim(), city: fd.get('city').trim(), sex: fd.get('sex'), bio: fd.get('bio').trim() }); toast('Perfil guardado.'); render(); },
 };
 
@@ -3366,7 +3490,7 @@ function bind() {
   document.addEventListener('input', (e) => { const el = e.target; if (el.dataset.input === 'q') { R.q = el.value; render(); } });
   document.addEventListener('submit', (e) => {
     const f = e.target.closest('[data-form]'); if (!f) return;
-    e.preventDefault(); if (FORMS[f.dataset.form]) FORMS[f.dataset.form](new FormData(f), f);
+    e.preventDefault(); if (FORMS[f.dataset.form]) FORMS[f.dataset.form](new FormData(f, e.submitter && e.submitter.form === f && e.submitter.name ? e.submitter : undefined), f);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && R.confirm) { R.confirm = null; render(); } });
   // chart scrubbing
@@ -3407,6 +3531,7 @@ try { const s = JSON.parse(localStorage.getItem('passo.rec') || 'null'); if (s &
 if (location.hash === '#aovivo') { R.view = 'live'; ensureLiveTimer(); }
 render();
 initRoom();
+cloudInit();
 window.addEventListener('hashchange', () => { if (location.hash === '#aovivo') navigate('live'); });
 
 </script>

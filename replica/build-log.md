@@ -18,3 +18,10 @@
 | S22 upload | 2026-10-18 | done | ficheiros FIT | — |
 
 Testes: `app/` passa um percurso automático em Chromium (desktop 1366 e telemóvel 390): todos os ecrãs, gravar → guardar, kudos, comentário, rota, GPX, entrada manual, km/milhas, tema escuro. Zero erros de consola, sem scroll horizontal.
+
+## Backend (2026-10-18)
+
+- Supabase: projeto «Nuno's Playground», schema `passo` (migração `passo_init`): 26 tabelas com RLS, funções `push_live`, `end_live`, `get_live`, `get_live_many`.
+- Testado por SQL numa transação desfeita: o dono escreve a partilha; outro utilizador não vê atividades privadas nem toma conta da partilha; um visitante anónimo lê só a partilha cujo id conhece; o anónimo não lê tabelas.
+- App: `app/src/cloud.js` (login, envio da posição ao vivo a cada 3 s, página pública `?s=<id>`, cópia de atividades e sessões). Desligado quando não há rede (pré-visualização do Claude).
+- Por fazer antes de abrir registos: expor o schema `passo` na Data API; impedir que o trigger `handle_new_user` da app de reservas dê acesso a utilizadores do Passo.

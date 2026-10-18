@@ -6,6 +6,7 @@ const APP_URL = 'https://claude.ai/artifact/YWWo8nGdZsjqCQyLorTM4d';
 function shareUrl() {
   const h = location.hostname || '';
   const hosted = /^https?:$/.test(location.protocol) && h && !/claude|anthropic|localhost|127\.0\.0\.1/.test(h);
+  if (hosted && CLOUD.ok && CLOUD.user) return location.origin + location.pathname + '?s=' + REC.shareId;
   return (hosted ? location.origin + location.pathname : APP_URL) + '#aovivo';
 }
 function whatsappHref(text) { return 'https://wa.me/?text=' + encodeURIComponent(text); }
@@ -117,6 +118,7 @@ function liveList() {
   if (REC.state !== 'idle') { const s = liveSnapOwn(false); if (s) out.push({ ...s, mine: true }); }
   PEERS.forEach((e, k) => { if (e.snap) out.push({ ...e.snap, trail: e.trail, peer: k, remote: true }); });
   SIMS.forEach((m) => out.push(simSnap(m)));
+  if (typeof cloudLiveList === 'function') cloudLiveList().forEach((s) => out.push(s));
   return out;
 }
 
@@ -264,6 +266,7 @@ function viewLive() {
   if (!list.length) {
     return `${pageHead('Ao vivo', 'Atletas a partilhar a sessão agora', '', false)}
       ${empty('Ninguém está a partilhar agora', 'Quando alguém partilhar uma sessão contigo, aparece aqui o mapa, os indicadores e a música em tempo real.', `<div class="row-gap"><button class="btn btn-primary" data-act="demoLive">${icon('play', 18)}Ver uma demonstração</button><button class="btn btn-secondary" ${go('race')}>${icon('groups', 18)}Seguir vários atletas numa prova</button></div>`)}
+      <form class="card form" data-form="followLink"><h3 class="h-sm">Recebeste um link?</h3><div class="comment-form"><label class="sr" for="follow-link">Link de partilha</label><input id="follow-link" name="link" placeholder="Cola aqui o link que recebeste"><button class="btn btn-primary btn-sm">Seguir</button></div></form>
       <section class="card"><h3 class="h-sm">Como funciona</h3><p class="sm">Quem corre inicia uma <b>sessão</b> na app (por exemplo ao sair de casa) e partilha o link pelo WhatsApp. Quem abre o link vê-o no mapa logo a partir daí: deslocação, aquecimento e depois a atividade, quando ele carregar em iniciar.</p></section>`;
   }
   const sel = list.find((s) => s.id === R.liveSel) || list[0];
@@ -330,6 +333,7 @@ function viewRace() {
         <label class="fld"><span>Nome</span><input id="race-name" name="name" required maxlength="60" value="Corrida da Ribeira 10K"></label>
         <label class="fld"><span>Percurso da prova</span><select id="race-course" name="course">${courseOptions().map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>
         <fieldset class="fld"><legend>Atletas a seguir</legend><div class="pick-grid">${cand.map((u) => `<label class="pick"><input type="checkbox" name="runners" value="${u}" ${['u1', 'u3', 'u8', 'u5'].includes(u) ? 'checked' : ''}>${avatar(u, 28)}<span>${esc(user(u).name)}</span></label>`).join('')}</div></fieldset>
+        <label class="fld"><span>Links de partilha de atletas reais (um por linha)</span><textarea id="race-links" name="links" rows="2" placeholder="https://…/?s=abc123def4"></textarea></label>
         <p class="muted sm">Na demonstração estes atletas são simulados no percurso. Quem estiver a partilhar uma sessão a sério noutro dispositivo também aparece.</p>
         <div class="form-actions"><button class="btn btn-primary">${icon('play', 18)}Começar a seguir</button></div>
       </form>`;
@@ -431,7 +435,7 @@ function trainingSteps() {
 function settingsConnections() {
   const c = DB.settings.conn;
   const row = (id, name, desc, on) => `<div class="conn"><span class="conn-ic">${icon(id === 'samsung' ? 'heart' : id === 'spotify' ? 'play' : 'beacon', 20)}</span><div class="grow"><b>${name}</b><div class="muted sm">${desc}</div></div><label class="switch"><input type="checkbox" id="conn-${id}" ${on ? 'checked' : ''} data-change="conn" data-id="${id}"><span></span><span class="sr">${name}</span></label></div>`;
-  return `<section class="card form"><h3 class="h-sm">Ligações</h3>
+  return `${settingsCloud()}<section class="card form"><h3 class="h-sm">Ligações</h3>
     ${row('samsung', 'Samsung Health', c.samsung ? 'Ligado (dados de demonstração). Passos diários dos últimos 60 dias.' : 'Passos diários e frequência cardíaca do Galaxy Watch.', c.samsung)}
     ${row('spotify', 'Música a tocar', c.spotify ? 'Ligado (demonstração). A música aparece na partilha ao vivo.' : 'Mostra a quem te segue ao vivo a música que estás a ouvir.', c.spotify)}
     <div class="conn"><span class="conn-ic">${icon('heart', 20)}</span><div class="grow"><b>Sensor de frequência cardíaca</b><div class="muted sm">${REC.hrDevice ? 'Ligado: ' + esc(REC.hrDevice) : 'Cintas e relógios com Bluetooth (no Chrome do Android ou do computador).'}</div></div><button class="btn btn-secondary btn-sm" data-act="hrConnect">${REC.hrDevice ? 'Religar' : 'Ligar'}</button></div>
