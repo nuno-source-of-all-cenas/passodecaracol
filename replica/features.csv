@@ -1,0 +1,70 @@
+feature,area,priority,original,clone,notes
+Registo de atividade com GPS (iniciar pausar retomar terminar),record,must,yes,partial,GPS real via Geolocation quando a app corre no teu dominio; no artifact usa simulador ao longo de uma rota
+Escolha do desporto antes de gravar,record,must,yes,yes,
+Estatisticas ao vivo (tempo distancia ritmo desnivel),record,must,yes,yes,
+Voltas manuais durante a gravacao,record,should,yes,yes,
+Pausa automatica,record,should,yes,yes,abaixo de 0.6 m/s
+Guardar atividade com titulo descricao privacidade e equipamento,record,must,yes,yes,
+Esforco percebido (RPE) ao guardar,record,could,yes,yes,
+Fotos na atividade,record,should,yes,yes,redimensionadas no browser
+Descartar gravacao,record,must,yes,yes,
+Entrada manual de atividade,record,should,yes,yes,
+Importar ficheiro GPX,record,must,yes,yes,
+Partilha de localizacao em direto (Beacon),record,could,yes,partial,link gerado e contactos; sem servidor ainda
+Feed de atividades de quem segues,feed,must,yes,yes,
+Kudos,social,must,yes,yes,
+Comentarios,social,must,yes,yes,
+Seguir e deixar de seguir atletas,social,must,yes,yes,
+Pesquisa de atletas e sugestoes,social,should,yes,yes,
+Notificacoes (kudos comentarios seguidores),social,must,yes,yes,simuladas no cliente
+Detalhe da atividade com mapa,activity,must,yes,yes,mapa SVG sem tiles (tiles OSM na fase backend)
+Parciais por km,activity,must,yes,yes,
+Perfil de altimetria e grafico de ritmo,activity,must,yes,yes,
+Melhores esforcos (400m 1km 5km 10km meia),activity,should,yes,yes,
+Zonas de frequencia cardiaca,activity,should,yes,yes,
+Esforco relativo,activity,should,yes,yes,formula propria baseada em FC ou ritmo
+Calorias estimadas,activity,could,yes,yes,
+Editar e apagar atividade,activity,must,yes,yes,
+Privacidade por atividade (todos seguidores so eu),privacy,must,yes,yes,
+Zonas de privacidade (esconder inicio e fim),privacy,should,yes,yes,
+Atividades semelhantes no mesmo percurso,activity,could,yes,yes,
+Flyby (quem passou por ti),activity,could,yes,no,
+Segmentos: deteccao automatica de esforcos,segments,must,yes,yes,algoritmo proprio de correspondencia
+Segmentos: classificacao geral,segments,must,yes,yes,
+Segmentos: filtros (mulheres homens este ano seguidos clube),segments,should,yes,yes,
+Coroas KOM QOM e recordes pessoais,segments,must,yes,yes,
+Local Legend (mais esforcos em 90 dias),segments,could,yes,yes,
+Explorar e marcar segmentos com estrela,segments,should,yes,yes,
+Criar segmento a partir de uma atividade,segments,should,yes,yes,
+Construtor de rotas com cliques no mapa,routes,must,yes,yes,
+Seguir ruas ao desenhar a rota,routes,should,yes,yes,encaixa na grelha de ruas do mapa de demo
+Distancia e desnivel da rota,routes,must,yes,yes,
+Ida e volta e inverter rota,routes,could,yes,yes,
+Gravar seguindo uma rota guardada,routes,should,yes,yes,
+Exportar GPX,routes,could,yes,yes,
+Perfil do atleta com totais (semana ano sempre),profile,must,yes,yes,
+Grafico semanal das ultimas 12 semanas,profile,should,yes,yes,
+Vitrine de trofeus,profile,could,yes,yes,
+Heatmap pessoal,profile,could,yes,yes,
+Seguidores e a seguir,profile,must,yes,yes,
+Diario de treino / calendario,training,should,yes,yes,
+Forma e frescura (fitness fadiga forma),training,should,yes,yes,
+Objetivos semanais mensais anuais,training,should,yes,yes,
+Planos de treino,training,could,yes,no,
+Equipamento com quilometragem e alerta,gear,should,yes,yes,
+Clubes: entrar sair membros,clubs,must,yes,yes,
+Clubes: feed e publicacoes,clubs,should,yes,yes,
+Clubes: classificacao semanal,clubs,should,yes,yes,
+Clubes: eventos com inscricao,clubs,could,yes,yes,
+Desafios: aderir e progresso,challenges,must,yes,yes,
+Desafios: medalha ao completar,challenges,could,yes,yes,
+Unidades km ou milhas,settings,must,yes,yes,
+Subscricao paga com funcionalidades bloqueadas,payments,should,yes,partial,interruptor de demo; Stripe na fase backend
+Registo e login,auth,must,yes,no,fase backend (Supabase Auth)
+App movel nativa,platform,should,yes,no,web responsiva primeiro; Expo depois
+Sincronizacao com relogios e sensores,integrations,should,yes,no,via APIs oficiais (Garmin Health API etc) com as tuas chaves
+O teu ano em desporto (resumo anual),profile,could,yes,no,
+Heatmap global de todos os utilizadores,maps,could,yes,skip,depende da rede de utilizadores e dos dados deles
+Classificacoes com milhoes de atletas reais,segments,must,yes,skip,a rede e os dados pertencem ao original; a funcionalidade esta feita
+Mapas base proprietarios,maps,should,yes,skip,usar OpenStreetMap ou MapLibre com tiles proprios
+Parcerias de marcas em desafios,challenges,could,yes,skip,acordos comerciais nao sao funcionalidade
