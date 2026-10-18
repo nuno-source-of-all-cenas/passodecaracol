@@ -12,7 +12,7 @@ mkdir -p dist
   echo '<style>'; cat src/styles.css; echo '</style>'
   echo '<div id="app"></div><div id="toasts" class="toasts" aria-live="polite"></div>'
   echo '<script>'
-  for f in core seed analysis store charts views main; do cat "src/$f.js"; echo; done
+  for f in core seed analysis store charts live views main; do cat "src/$f.js"; echo; done
   echo '</script>'
 } > dist/index.html
 {

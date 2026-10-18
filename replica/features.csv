@@ -68,3 +68,20 @@ Heatmap global de todos os utilizadores,maps,could,yes,skip,depende da rede de u
 Classificacoes com milhoes de atletas reais,segments,must,yes,skip,a rede e os dados pertencem ao original; a funcionalidade esta feita
 Mapas base proprietarios,maps,should,yes,skip,usar OpenStreetMap ou MapLibre com tiles proprios
 Parcerias de marcas em desafios,challenges,could,yes,skip,acordos comerciais nao sao funcionalidade
+Sessao (nivel 1) iniciada antes da atividade com deslocacao e aquecimento,sessions,must,no,yes,ideia do Nuno; varias atividades (nivel 2) dentro de uma sessao
+Varias atividades (treino ou prova) dentro da mesma sessao,sessions,must,no,yes,
+Partilhar a sessao ao vivo antes de comecar a atividade,live,must,no,yes,presence em tempo real entre dispositivos com acesso a app publicada
+Partilha pelo WhatsApp com link,live,must,no,yes,
+Ecra de acompanhamento com mapa e indicadores em tempo real,live,must,no,yes,
+Percurso oficial carregado por quem acompanha (GPX) com distancia em falta e hora de chegada,live,should,no,yes,
+Musica que o atleta esta a ouvir,live,should,no,partial,demo; real via Spotify Web API (currently playing) ou media session no Android
+Clipe de video de 3 s a cada 500 m,live,should,no,partial,camara real no navegador quando permitido; na demo imagem gerada do local; envio para outros precisa de backend (storage)
+Fotos oficiais da prova e certificados na atividade,race,must,no,yes,
+Dados oficiais da prova (dorsal tempo oficial posicoes escalao),race,should,no,yes,
+Exportar atividade e todas as atividades em CSV,export,must,no,yes,resumo parciais e pontos GPS
+Ficha das sapatilhas (tipo drop peso preco custo por km vida util),gear,must,no,yes,
+Passos diarios via Samsung Health,steps,must,no,partial,demo e importacao CSV; real via Health Connect na app Android
+Passos e cadencia por atividade,steps,should,no,yes,estimados pela velocidade quando o relogio nao os envia
+Ligar sensor de FC por Bluetooth,record,could,no,yes,Web Bluetooth (Chrome Android e desktop)
+Seguir varios atletas em simultaneo na mesma prova,live,must,no,yes,demo simulada; atletas reais aparecem se estiverem a partilhar
+Retomar sessao interrompida,record,should,no,yes,

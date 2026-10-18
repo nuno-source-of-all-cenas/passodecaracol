@@ -216,3 +216,53 @@ function toGPX(name, sport, pts) {
   const body = pts.map(([x, y]) => { const [lat, lon] = toLL(x, y); return `    <rtept lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}"><ele>${terrain(x, y).toFixed(1)}</ele></rtept>`; }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Passo" xmlns="http://www.topografix.com/GPX/1/1">\n  <rte><name>${esc(name)}</name><type>${sport}</type>\n${body}\n  </rte>\n</gpx>\n`;
 }
+
+/* ---------- sessions (level 1) ---------- */
+const _sessCache = new Map();
+/* The whole stream of a session plus the ranges of each part:
+   [{kind, label, i0, i1, aid?}] over one track with t from the session start. */
+function sessionData(sess) {
+  const hit = _sessCache.get(sess.id);
+  if (hit && hit.v === (sess.v || 0)) return hit;
+  let track = [], ranges = [];
+  if (sess.track) { track = sess.track; ranges = sess.ranges || []; }
+  else {
+    let t0 = 0;
+    const push = (pts, kind, label, aid) => {
+      if (!pts || !pts.length) return;
+      const i0 = track.length, base = pts[0][3];
+      pts.forEach((p) => track.push([p[0], p[1], p[2], t0 + p[3] - base, p[4]]));
+      t0 = track[track.length - 1][3] + 4;
+      ranges.push({ kind, label, i0, i1: track.length - 1, aid });
+    };
+    sess.parts.forEach((p) => {
+      if (p.kind === 'wait') {
+        const last = track[track.length - 1]; if (!last) return;
+        const pts = []; for (let s = 0; s <= p.seconds; s += 30) pts.push([last[0], last[1], last[2], s, last[4] ? Math.max(70, last[4] - s / 6) : 0]);
+        push(pts, 'wait', p.label);
+      } else if (p.kind === 'activity') {
+        const a = activity(p.aid); if (!a) return;
+        push(trackOf(a), 'activity', a.name, a.id);
+      } else {
+        const r = BASE_ROUTES[p.gen.route];
+        push(synthTrack(r.pts, p.sport, p.gen.ability, p.gen.seed, p.gen.hr), p.kind, p.label);
+      }
+    });
+  }
+  let dist = 0; const cum = [0];
+  for (let i = 1; i < track.length; i++) { dist += haversine(track[i - 1][0], track[i - 1][1], track[i][0], track[i][1]); cum.push(dist); }
+  const res = { v: sess.v || 0, track, ranges, cum, dist, time: track.length ? track[track.length - 1][3] : 0 };
+  _sessCache.set(sess.id, res);
+  return res;
+}
+
+/* Steps and cadence: from the device when it gives them, else estimated
+   from speed (running ~150-190 spm, walking ~95-125 spm). */
+function activitySteps(a) {
+  const an = analyze(a), fam = sportFamily(a.sport);
+  if (a.steps) return { steps: a.steps, cadence: an.moving ? Math.round(a.steps / (an.moving / 60)) : 0, measured: true };
+  if ((fam !== 'run' && fam !== 'walk') || !an.moving || !an.dist) return null;
+  const v = an.dist / an.moving;
+  const cad = fam === 'run' ? clamp(150 + (v - 2.5) * 14, 150, 190) : clamp(100 + (v - 1.2) * 30, 95, 125);
+  return { steps: Math.round(cad * an.moving / 60), cadence: Math.round(cad), measured: false };
+}

@@ -277,3 +277,44 @@ create policy "create" on segments for insert with check (creator_id = auth.uid(
 alter table segment_efforts enable row level security;
 create policy "read visible" on segment_efforts for select using (exists (select 1 from activities a where a.id = activity_id and can_view_activity(a)));
 -- efforts are written only by the analyze_activity job (service role).
+
+-- v2: sessions (level 1), live sharing, race files, steps
+create table sessions (
+  id uuid primary key default gen_random_uuid(),
+  athlete_id uuid not null references athletes(id) on delete cascade,
+  title text not null,
+  start_at timestamptz not null,
+  end_at timestamptz,
+  share_id text unique,              -- live link; null when not shared
+  share_expires_at timestamptz,
+  stream_path text,                  -- whole session stream in storage
+  created_at timestamptz not null default now()
+);
+create index on sessions (athlete_id, start_at desc);
+alter table activities add column session_id uuid references sessions(id) on delete set null;
+alter table activities add column kind text not null default 'treino' check (kind in ('treino','prova'));
+alter table activities add column race jsonb;  -- name, bib, official_s, pos, total, cat, pos_cat, url
+create table activity_files (
+  id uuid primary key default gen_random_uuid(),
+  activity_id uuid not null references activities(id) on delete cascade,
+  kind text not null check (kind in ('official_photo','certificate','clip')),
+  path text not null, name text, km numeric(5,1),
+  created_at timestamptz not null default now()
+);
+create index on activity_files (activity_id);
+alter table gear add column type text, add column drop_mm smallint, add column weight_g smallint,
+  add column purchased_on date, add column price_cents integer, add column notes text, add column photo_path text;
+create table daily_steps (
+  athlete_id uuid not null references athletes(id) on delete cascade,
+  day date not null, steps integer not null check (steps >= 0),
+  source text not null default 'health_connect',
+  primary key (athlete_id, day)
+);
+alter table sessions enable row level security;
+create policy "owner" on sessions for all using (athlete_id = auth.uid()) with check (athlete_id = auth.uid());
+-- public live view goes through an edge function that checks share_id and expiry, never through RLS.
+alter table activity_files enable row level security;
+create policy "read visible" on activity_files for select using (exists (select 1 from activities a where a.id = activity_id and can_view_activity(a)));
+create policy "owner write" on activity_files for all using (exists (select 1 from activities a where a.id = activity_id and a.athlete_id = auth.uid()));
+alter table daily_steps enable row level security;
+create policy "owner" on daily_steps for all using (athlete_id = auth.uid()) with check (athlete_id = auth.uid());

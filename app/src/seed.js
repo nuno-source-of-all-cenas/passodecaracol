@@ -29,6 +29,9 @@ const BASE_ROUTES = {
   baixa: { name: 'Passeio na baixa', sport: 'walk', pts: [[0, -1280], [640, -1280], [640, -480], [-480, -480], [-480, -1280], [0, -1280]] },
   marginal: { name: 'Marginal', sport: 'ride', pts: [[0, -1280], ...MARG_OUT, ...MARG_OUT.slice(0, -1).reverse(), [0, -1280]] },
   serra: { name: 'Volta da serra', sport: 'ride', pts: [[0, -1280], [0, -640], [-1600, -640], [-3400, 900], ...RIDGE_LOOP, [-3400, 900], [-1600, -640], [0, -640], [0, -1280]] },
+  prova10k: { name: 'Corrida da Ribeira 10K', sport: 'run', pts: [[-1800, -1520], [3200, -1520], [3200, -1440], [-1800, -1440]] },
+  aquecimento: { name: 'Casa até à partida', sport: 'run', pts: [[0, -1280], [0, -1440], [-1600, -1440], [-1600, -1520], [-1800, -1520]] },
+  regresso: { name: 'Regresso a casa', sport: 'walk', pts: [[-1800, -1440], [0, -1440], [0, -1280]] },
   colina: { name: 'Colinas a nascente', sport: 'ride', pts: [[0, -1280], [3200, -1280], ...loopPts(4200, 2600, 1400, 1300, 16, -Math.PI / 2, 0.2, 5), [3200, -1280], [0, -1280]] },
 };
 
@@ -131,7 +134,8 @@ function synthTrack(routePts, sport, ability, seed, withHr, interval = 4) {
 }
 
 /* ---------- the seed database ---------- */
-function buildSeed() {
+function buildSeed() { return upgradeTo4(buildSeed3()); }
+function buildSeed3() {
   const r = mulberry32(20261018);
   const now = Date.now(), today = startOfDay(now);
   const users = PEOPLE.map((p) => ({ id: p.id, name: p.name, sex: p.sex, city: p.city, ability: p.ability, hasHr: p.hr, bio: '', joined: today - (200 + Math.floor(r() * 900)) * 864e5 }));
@@ -251,4 +255,44 @@ function buildSeed() {
     notifications,
     settings: { units: 'metric', defaultVisibility: 'everyone', privacyZone: { on: true, x: 0, y: -1280, radius: 400 }, pro: true, autopause: true },
   };
+}
+
+/* ---------- v4: sessions (level 1), race data, richer gear, steps ---------- */
+const PLAYLIST = [
+  ['Maré Alta', 'Os Faróis'], ['Quilómetro Zero', 'Banda do Cais'], ['Subida Lenta', 'Lua Norte'], ['Vento de Feição', 'Ana Prado'],
+  ['Asfalto Molhado', 'Os Faróis'], ['Último Fôlego', 'Trilho Sonoro'], ['Ponte Velha', 'Lua Norte'], ['Corre Comigo', 'Ana Prado'],
+  ['Cadência', 'Duo Meridiano'], ['Linha de Chegada', 'Banda do Cais'],
+];
+function lastSunday(now) { const d = new Date(startOfDay(now)); d.setDate(d.getDate() - (d.getDay() || 7)); return d.getTime(); }
+function upgradeTo4(db) {
+  if (db.version >= 4) return db;
+  const now = Date.now(), sun = lastSunday(now);
+  db.sessions = db.sessions || [];
+  db.steps = db.steps || {};
+  db.settings.conn = db.settings.conn || { samsung: false, spotify: false };
+  db.settings.live = db.settings.live || { share: true, music: true, clips: true };
+  const extra = { g1: { type: 'Estrada', drop: 8, weight: 265, purchased: '2025-11-02', price: 140 }, g2: { type: 'Trail', drop: 6, weight: 300, purchased: '2026-03-15', price: 160 }, g4: { type: 'Estrada', drop: 8, weight: 270, purchased: '2024-09-10', price: 130 } };
+  db.gear.forEach((g) => Object.assign(g, extra[g.id] || {}));
+  if (!db.gear.find((g) => g.id === 'g5')) db.gear.push({ id: 'g5', uid: db.me, kind: 'shoe', name: 'Sapatilhas de competição', brand: 'Pista Leve 2', type: 'Competição', drop: 6, weight: 190, purchased: '2026-06-01', price: 210, baseKm: 64, alertKm: 400, retired: false, defaultFor: '', notes: 'Só para provas e treinos de ritmo.' });
+  if (!db.activities.find((a) => a.id === 'race1')) {
+    const start = sun + 9 * 36e5 + 12 * 6e4;                         // gun time 09:12
+    const gen = { route: 'prova10k', seed: 4242, ability: 1.13, hr: true };
+    const tr = synthTrack(BASE_ROUTES.prova10k.pts, 'run', gen.ability, gen.seed, true);
+    const race = { id: 'race1', uid: db.me, sport: 'run', kind: 'prova', name: 'Corrida da Ribeira 10K', desc: 'Primeira prova da época. Saída rápida, segurei o ritmo na volta.', start, gen,
+      visibility: 'everyone', gearId: 'g5', rpe: 9, photos: [], laps: [], hideStats: {}, created: start + 4e6, sessionId: 'ss1',
+      race: { name: 'Corrida da Ribeira 10K', bib: '1487', official: tr[tr.length - 1][3] + 3, pos: 214, total: 2380, posCat: 31, cat: 'M35', url: '', photos: [], certs: [] } };
+    db.activities.push(race);
+    db.activities.sort((a, b) => b.start - a.start);
+    ['u1', 'u3', 'u8', 'u5'].forEach((u, i) => db.kudos.push(['race1', u, start + 5e6 + i * 6e5]));
+    db.comments.push({ id: 'c_race1', aid: 'race1', uid: 'u1', text: 'Grande prova! Esse segundo 5 km foi fortíssimo.', at: start + 8e6 });
+    db.sessions.unshift({ id: 'ss1', uid: db.me, title: 'Dia de prova: Corrida da Ribeira 10K', start: start - 41 * 6e4, shareId: 'k7m2qa',
+      parts: [
+        { kind: 'warmup', label: 'Deslocação e aquecimento', sport: 'run', gen: { route: 'aquecimento', seed: 31, ability: 0.6, hr: true } },
+        { kind: 'wait', label: 'Na partida', seconds: 540 },
+        { kind: 'activity', aid: 'race1' },
+        { kind: 'cooldown', label: 'Regresso a casa', sport: 'walk', gen: { route: 'regresso', seed: 32, ability: 0.95, hr: true } },
+      ] });
+  }
+  db.version = 4;
+  return db;
 }

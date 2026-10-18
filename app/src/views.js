@@ -28,8 +28,8 @@ function pageHead(title, sub = '', right = '', back = true) {
 /* ---------- chrome ---------- */
 function chrome() {
   const v = R.view, n = unreadCount();
-  const nav = [['feed', 'Painel', 'home'], ['training', 'Treino', 'calendar'], ['explore', 'Explorar', 'map'], ['groups', 'Grupos', 'groups']];
-  const on = (k) => (v === k || (k === 'explore' && ['segment', 'routeBuilder'].includes(v)) || (k === 'groups' && ['club', 'challenge'].includes(v))) ? 'on' : '';
+  const nav = [['feed', 'Painel', 'home'], ['training', 'Treino', 'calendar'], ['explore', 'Explorar', 'map'], ['groups', 'Grupos', 'groups'], ['live', 'Ao vivo', 'beacon']];
+  const on = (k) => (v === k || (k === 'explore' && ['segment', 'routeBuilder'].includes(v)) || (k === 'groups' && ['club', 'challenge'].includes(v)) || (k === 'live' && v === 'race')) ? 'on' : '';
   return `
   <header class="top"><div class="top-in">
     <a class="logo" href="#" ${go('feed')} aria-label="Passo, painel">${logoMark()}<span>passo</span></a>
@@ -72,6 +72,7 @@ function activityCard(a) {
     <button class="ac-title" ${go('activity', { id: a.id })}>${esc(a.name)}</button>
     ${a.desc ? `<p class="ac-desc">${esc(a.desc)}</p>` : ''}
     <div class="stats-row">${s3.join('')}</div>
+    ${a.kind === 'prova' || a.race ? `<div class="ach"><span class="pill pill-race">${icon('medal', 14)} Prova${a.race && a.race.official ? ' · tempo oficial ' + fmtDur(a.race.official) : ''}${a.race && a.race.pos ? ' · ' + a.race.pos + 'º' : ''}</span></div>` : ''}
     ${prs || crownsN ? `<div class="ach">${crownsN ? `<span class="pill pill-gold">${icon('crown', 14)} ${crownsN} ${crownsN > 1 ? 'coroas' : 'coroa'}</span>` : ''}${prs ? `<span class="pill pill-pr">${icon('medal', 14)} ${prs} ${prs > 1 ? 'recordes pessoais' : 'recorde pessoal'}</span>` : ''}</div>` : ''}
     ${an.hasMap ? `<button class="ac-map" ${go('activity', { id: a.id })} aria-label="Abrir ${esc(a.name)}">${activityMap(a, { w: 640, h: 300, hideZone: !mine })}${a.photos && a.photos[0] ? `<img class="ac-photo" src="${a.photos[0]}" alt="Foto da atividade">` : ''}</button>` : (a.photos && a.photos[0] ? `<img class="ac-photo-big" src="${a.photos[0]}" alt="Foto da atividade">` : '')}
     <div class="ac-foot">
@@ -119,6 +120,8 @@ function viewFeed() {
       ${goals.length ? `<section class="card"><div class="card-h"><h3>Objetivos</h3><button class="link sm" ${go('training', { tab: 'goals' })}>Gerir</button></div>${goals.map(goalRow).join('')}</section>` : ''}
     </aside>
     <main class="feed-c" aria-label="Atividades de quem segues">
+      ${liveBanner()}
+      ${REC.state !== 'idle' ? `<button class="card live-banner mine" ${go('record')}><span class="live-dot"></span><span class="grow left"><b>A tua sessão está a gravar</b><span class="muted sm">${REC.act ? esc(REC.act.name) : 'Ainda sem atividade'}</span></span></button>` : ''}
       ${list.length ? shown.map(activityCard).join('') : empty('O teu painel está vazio', 'Segue atletas ou grava a tua primeira atividade para ver aqui o feed.', `<button class="btn btn-primary" ${go('search')}>Encontrar atletas</button>`)}
       ${list.length > shown.length ? `<button class="btn btn-secondary wide" data-act="more">Ver mais atividades</button>` : ''}
     </main>
@@ -168,6 +171,9 @@ function viewActivity() {
   if (an.avgHr && !(asOthers && hide.hr)) { small.push(['FC média', an.avgHr + ' bpm']); small.push(['FC máx.', an.maxHr + ' bpm']); }
   if (!(asOthers && hide.calories)) small.push(['Calorias', NF0.format(an.calories)]);
   if (a.rpe) small.push(['Esforço percebido', a.rpe + '/10']);
+  const st = activitySteps(a);
+  if (st) { small.push(['Passos', NF0.format(st.steps) + (st.measured ? '' : ' (estimados)')]); small.push(['Cadência média', st.cadence + ' ppm']); }
+  if (a.sessionId && DB.sessions.find((x) => x.id === a.sessionId)) small.push(['Sessão', `<button class="link" ${go('session', { id: a.sessionId })}>Ver sessão</button>`]);
   if (gear) small.push([gear.kind === 'bike' ? 'Bicicleta' : 'Sapatilhas', esc(gear.name)]);
 
   let body = '';
@@ -191,10 +197,12 @@ function viewActivity() {
       ${an.effort ? `<div class="effort"><span class="eff-n">${an.effort}</span><div><b>Esforço relativo · ${effortLabel(an.effort)}</b><div class="muted sm">${an.zones ? 'Calculado a partir do tempo em cada zona de frequência cardíaca.' : 'Estimado a partir da duração e do ritmo (sem frequência cardíaca).'}</div></div></div>` : ''}
     </section>
     ${an.hasMap ? `<section class="card flush">${activityMap(a, { w: 900, h: 420, kms: true, cursor: true, hideZone: asOthers, cls: 'map-lg', segment: R.hlSeg != null ? effs[R.hlSeg] : null })}${asOthers && DB.settings.privacyZone.on ? `<div class="map-note">${icon('lock', 14)} Os outros não veem o início e o fim dentro da tua zona de privacidade.</div>` : ''}</section>` : ''}
+    ${activityRaceCard(a)}
     ${a.photos && a.photos.length ? `<section class="photos">${a.photos.map((p) => `<img src="${p}" alt="Foto da atividade">`).join('')}</section>` : ''}
     ${tabs(tabsList, tab, 'actTab')}
     ${body}
     ${activityComments(a)}
+    ${mine ? `<section class="card"><div class="card-h"><h3>Exportar</h3><span class="muted sm">CSV</span></div><div class="rb-btns"><button class="btn btn-secondary btn-sm" ${act('exportAct', { id: a.id, what: 'summary' })}>Resumo e dados da prova</button>${an.splits.length ? `<button class="btn btn-secondary btn-sm" ${act('exportAct', { id: a.id, what: 'splits' })}>Parciais</button>` : ''}${an.hasMap ? `<button class="btn btn-secondary btn-sm" ${act('exportAct', { id: a.id, what: 'points' })}>Pontos GPS</button>` : ''}</div></section>` : ''}
   </div>`;
 }
 
@@ -297,6 +305,7 @@ function activityForm({ a, mode }) {
       <label class="chk"><input type="checkbox" id="h-hr" name="h_hr" ${hide.hr ? 'checked' : ''}> Frequência cardíaca</label>
       <label class="chk"><input type="checkbox" id="h-cal" name="h_calories" ${hide.calories ? 'checked' : ''}> Calorias</label></div></fieldset>
     <div class="fld"><span class="fld-l">Fotos</span><div class="photo-row" id="photo-row">${(a.photos || []).map((p, i) => `<span class="ph"><img src="${p}" alt=""><button type="button" class="icon-btn sm" ${act('rmPhoto', { i })} aria-label="Remover foto">${icon('close', 14)}</button></span>`).join('')}<label class="ph-add">${icon('camera')}<span>Adicionar</span><input type="file" id="f-photo" accept="image/*" multiple data-change="photo"></label></div></div>
+    ${mode === 'edit' ? raceFields(a) : ''}
     <div class="form-actions">
       ${mode === 'save' ? `<button type="button" class="btn btn-ghost danger" data-act="discardAsk">Descartar</button>` : `<button type="button" class="btn btn-ghost danger" ${act('deleteAsk', { id: a.id })}>Apagar atividade</button>`}
       <button class="btn btn-primary">${mode === 'save' ? 'Guardar atividade' : 'Guardar alterações'}</button>
@@ -308,6 +317,7 @@ function viewEdit() {
   const a = activity(R.params.id);
   if (!a || a.uid !== me()) return pageHead('Editar') + empty('Não podes editar esta atividade', 'Só o dono pode editar.');
   if (!R.draftPhotos) R.draftPhotos = (a.photos || []).slice();
+  if (!R.draftRace) R.draftRace = { photos: ((a.race || {}).photos || []).slice(), certs: ((a.race || {}).certs || []).slice() };
   return pageHead('Editar atividade') + activityForm({ a: { ...a, photos: R.draftPhotos }, mode: 'edit' });
 }
 function viewSave() {
@@ -321,55 +331,88 @@ function viewSave() {
     ${activityForm({ a: { ...d, photos: d.photos || [] }, mode: 'save' })}`;
 }
 
-/* ---------- S02 record ---------- */
+/* ---------- S02 record: session (level 1) and activities (level 2) ---------- */
+function sharePanel() {
+  const L = DB.settings.live, url = shareUrl();
+  const msg = `Estou em direto no Passo${REC.act ? ': ' + REC.act.name : ''}. Acompanha-me no mapa em tempo real: ${url}`;
+  return `<section class="card share-card"><div class="card-h"><h3>${icon('beacon', 18)} Partilha ao vivo</h3>${L.share && REC.state !== 'idle' ? '<span class="pill pill-live">Em direto</span>' : ''}</div>
+    <label class="switch"><input type="checkbox" id="lv-share" ${L.share ? 'checked' : ''} data-change="liveOpt" data-k="share"><span></span>Partilhar a sessão desde que começa</label>
+    <label class="switch"><input type="checkbox" id="lv-music" ${L.music ? 'checked' : ''} data-change="liveOpt" data-k="music"><span></span>Mostrar a música que estou a ouvir${DB.settings.conn.spotify ? '' : ' <span class="muted sm">(liga a música nas definições)</span>'}</span></label>
+    <label class="switch"><input type="checkbox" id="lv-clips" ${L.clips ? 'checked' : ''} data-change="liveOpt" data-k="clips"><span></span>Clipe de 3 s a cada 500 m da atividade</label>
+    ${L.share ? `<div class="beacon-link"><a class="btn btn-wa btn-sm" href="${whatsappHref(msg)}" target="_blank" rel="noopener">${icon('share', 16)}Enviar pelo WhatsApp</a><button class="btn btn-secondary btn-sm" ${act('copyText', { t: url })}>Copiar link</button><button class="btn btn-ghost btn-sm" ${go('live')}>Ver como os outros veem</button></div>
+    <p class="muted xs">Quem abrir o link vê o mapa, os teus indicadores, a música e os clipes. Nesta versão, o link abre a app publicada no Claude, e só funciona para quem tiver acesso a ela.</p>` : ''}
+  </section>`;
+}
 function viewRecord() {
   const r = REC;
   if (r.state === 'idle') {
     const routes = DB.routes.filter((x) => x.uid === me());
-    return `<div class="rec-page">${pageHead('Gravar', 'Escolhe o desporto e carrega em começar')}
-      <section class="card"><h3 class="h-sm">Desporto</h3><div class="sport-pick">${Object.entries(SPORTS).filter(([, v]) => v.gps).map(([k, v]) => `<button class="sp ${r.sport === k ? 'on' : ''}" ${act('recSport', { s: k })} aria-pressed="${r.sport === k}" style="--sc:${v.color}">${icon(v.icon, 26)}<span>${v.label}</span></button>`).join('')}</div></section>
+    return `<div class="rec-page">${pageHead('Gravar', 'Começa uma sessão quando sais de casa. As atividades vivem lá dentro.')}
+      ${R.resumable ? `<section class="card warn-card"><b>Há uma sessão por terminar</b><p class="sm">Começou às ${DTF_TIME.format(R.resumable.start)}. Queres retomá-la?</p><div class="row-gap"><button class="btn btn-primary btn-sm" data-act="resumeRec">Retomar</button><button class="btn btn-ghost btn-sm" data-act="dropRec">Descartar</button></div></section>` : ''}
+      <section class="card"><h3 class="h-sm">Desporto da atividade</h3><div class="sport-pick">${Object.entries(SPORTS).filter(([, v]) => v.gps).map(([k, v]) => `<button class="sp ${r.sport === k ? 'on' : ''}" ${act('recSport', { s: k })} aria-pressed="${r.sport === k}" style="--sc:${v.color}">${icon(v.icon, 26)}<span>${v.label}</span></button>`).join('')}</div></section>
+      ${sharePanel()}
       <section class="card"><h3 class="h-sm">Sinal de localização</h3>
         <div class="seg-ctl" role="radiogroup" aria-label="Fonte de localização">
           <label><input type="radio" name="src" value="sim" ${r.source === 'sim' ? 'checked' : ''} data-change="recSrc"><span>Simulador</span></label>
           <label><input type="radio" name="src" value="gps" ${r.source === 'gps' ? 'checked' : ''} data-change="recSrc"><span>GPS do dispositivo</span></label>
         </div>
-        <p class="muted sm">${r.source === 'sim' ? 'O simulador percorre uma rota na cidade de demonstração, para poderes testar no computador.' : 'Usa a localização do teu telemóvel. Dentro da pré-visualização do Claude o acesso à localização está bloqueado; funciona quando a app estiver no teu domínio.'}</p>
-        ${r.source === 'sim' ? `<div class="form-grid"><label class="fld"><span>Rota</span><select id="rec-route" data-change="recRoute"><option value="">Automática (${esc(BASE_ROUTES[(ROUTES_BY_SPORT[r.sport] || ['ribeira'])[0]].name)})</option>${routes.map((x) => `<option value="${x.id}" ${r.routeId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+        <p class="muted sm">${r.source === 'sim' ? 'O simulador percorre uma rota na cidade de demonstração, para poderes testar no computador.' : 'Usa a localização do telemóvel. Dentro da pré-visualização do Claude a localização está bloqueada; funciona quando a app estiver no teu domínio.'}</p>
+        ${r.source === 'sim' ? `<div class="form-grid"><label class="fld"><span>Rota</span><select id="rec-route" data-change="recRoute"><option value="">Automática</option>${routes.map((x) => `<option value="${x.id}" ${r.routeId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
         <label class="fld"><span>Velocidade da simulação</span><select id="rec-speed" data-change="recSpeed">${[1, 10, 30, 60].map((n) => `<option value="${n}" ${r.speed === n ? 'selected' : ''}>${n === 1 ? 'Tempo real' : n + '× mais rápido'}</option>`).join('')}</select></label></div>` : ''}
-        <label class="switch"><input type="checkbox" id="rec-auto" ${DB.settings.autopause ? 'checked' : ''} data-change="autopause"><span></span>Pausa automática quando paras</label>
+        <div class="row-gap"><label class="switch"><input type="checkbox" id="rec-auto" ${DB.settings.autopause ? 'checked' : ''} data-change="autopause"><span></span>Pausa automática quando paras</label>
+        <button class="btn btn-secondary btn-sm" data-act="hrConnect">${icon('heart', 16)}${r.hrDevice ? 'Sensor: ' + esc(r.hrDevice) : 'Ligar relógio ou cinta (Bluetooth)'}</button></div>
       </section>
-      <section class="card beacon"><div class="card-h"><h3>${icon('beacon', 18)} Localização em direto</h3></div>
-        ${pro() ? `<label class="switch"><input type="checkbox" id="rec-beacon" ${r.beacon ? 'checked' : ''} data-change="beacon"><span></span>Partilhar a minha posição com contactos de segurança durante esta atividade</label>${r.beacon ? `<div class="beacon-link"><code id="beacon-url">passo.app/b/${r.beaconId}</code><button class="btn btn-secondary btn-sm" ${act('copy', { sel: '#beacon-url' })}>Copiar link</button></div><p class="muted sm">Quem tiver o link vê a tua posição e o teu tempo até terminares. (Nesta demo o link ainda não é servido.)</p>` : ''}` : proLock('A localização em direto')}
-      </section>
-      <button class="btn btn-primary btn-xl wide" data-act="recStart">${icon('play', 22)}Começar</button>
-      <p class="center muted sm">Sem GPS? <button class="link" ${go('upload')}>Carrega um GPX ou adiciona manualmente</button></p>
+      <div class="rec-start"><button class="btn btn-primary btn-xl" data-act="sessionStart">${icon('play', 22)}Iniciar sessão</button><button class="btn btn-secondary btn-xl" data-act="quickStart">${icon('record', 22)}Começar atividade já</button></div>
+      <p class="center muted sm">A sessão grava a deslocação e o aquecimento. Só carregas em «Iniciar treino» quando começa a sério.<br>Sem GPS? <button class="link" ${go('upload')}>Carrega um GPX ou adiciona manualmente</button></p>
     </div>`;
   }
-  const an = r.track.length > 1 ? analyze({ id: '_live', sport: r.sport, track: r.track, start: r.start, v: r.track.length }) : { dist: 0, moving: 0, gain: 0 };
+  const a = r.act;
   const xy = r.track.map((p) => toXY(p[0], p[1]));
-  const lastSpd = r.track.length > 3 ? (() => { const n = r.track.length, a = r.track[n - 4], b = r.track[n - 1]; const d = haversine(a[0], a[1], b[0], b[1]), dt = b[3] - a[3]; return dt ? [d, dt] : [0, 0]; })() : [0, 0];
-  const plan = r.routePts ? [{ xy: r.routePts, cls: 'm-plan', w: 4, noHalo: true }] : [];
-  const lines = [...plan, { xy: xy.length > 1 ? xy : [r.pos || [0, -1280], r.pos || [0, -1280]], cls: '' }];
-  const bbox = r.routePts ? bboxOf([r.routePts], 200) : bboxOf([xy.length ? xy : [[0, -1280]]], 500);
+  const actXY = a ? xy.slice(a.startIdx) : [];
+  const lines = [];
+  if (a && r.course) lines.push({ xy: densify(r.course, 20), cls: 'm-plan', w: 4, noHalo: true });
+  else if (r.routePts && r.source === 'sim') lines.push({ xy: r.routePts, cls: 'm-plan', w: 4, noHalo: true });
+  if (xy.length > 1) lines.push({ xy: a ? xy.slice(0, a.startIdx + 1) : xy, cls: 'm-transit', w: 3, noHalo: true });
+  r.ranges.forEach((g) => lines.push({ xy: xy.slice(g.i0, g.i1 + 1), cls: '' }));
+  if (actXY.length > 1) lines.push({ xy: actXY, cls: '' });
+  const here = xy[xy.length - 1] || r.pos || [0, -1280];
+  const bbox = a && r.course ? bboxOf([r.course, [here]], 200) : bboxOf([xy.length > 1 ? xy : [here]], 500);
+  const pace = curPace(r.track);
+  const actStats = a ? analyze({ id: '_live', sport: a.sport, track: r.track.slice(a.startIdx), start: r.start, v: r.track.length }) : null;
+  const status = a ? (a.paused ? 'Atividade em pausa' : a.autoPaused ? 'Pausa automática' : (a.kind === 'prova' ? 'Prova' : 'Treino') + ' a gravar') : 'Sessão ativa · ainda sem atividade';
+  const sessT = r.track.length ? r.track[r.track.length - 1][3] : 0;
+  const metric = (l, v, u = '') => `<div><div class="rs-l">${l}</div><div class="rs-v">${v}${u ? ` <small>${u}</small>` : ''}</div></div>`;
   return `<div class="rec-live">
-    <div class="rec-map">${mapSVG({ lines, markers: [...(xy.length ? [{ kind: 'start', xy: xy[0] }] : []), { kind: 'me', xy: xy[xy.length - 1] || r.pos || [0, -1280] }], w: 900, h: 420, bbox, label: 'Mapa da gravação em curso' })}
-      <div class="rec-status ${r.state}">${r.state === 'paused' ? (r.autoPaused ? 'Pausa automática' : 'Em pausa') : r.source === 'gps' ? (r.gpsOk ? 'GPS ativo' : 'À procura de sinal…') : 'A gravar (simulador ' + r.speed + '×)'}</div>
+    <div class="rec-map">${mapSVG({ lines: lines.length ? lines : [{ xy: [here, here] }], markers: [...(xy.length ? [{ kind: 'start', xy: xy[0] }] : []), { kind: 'me', xy: here }], w: 900, h: 420, bbox, label: 'Mapa da sessão em curso' })}
+      <div class="rec-status ${a && !a.paused ? 'recording' : 'paused'}">${status}${r.source === 'sim' ? ` · simulador ${r.speed}×` : r.gpsOk ? ' · GPS' : ' · à procura de sinal'}</div>
+      ${DB.settings.live.share ? `<div class="rec-live-pill"><span class="live-dot"></span>Partilhado</div>` : ''}
     </div>
-    <div class="rec-stats">
-      <div class="rs-main"><div class="rs-l">Tempo</div><div class="rs-v" id="rs-time">${fmtDur(r.elapsedMoving)}</div></div>
+    <div class="sess-bar"><span><b>Sessão</b> ${fmtDur(sessT)} · ${fmtDistU(r.sessDist, 2)}</span><span>${r.acts.length} ${r.acts.length === 1 ? 'atividade guardada' : 'atividades guardadas'}</span>${r.song && DB.settings.live.music ? `<span class="muted">♪ ${esc(r.song[0])} · ${esc(r.song[1])}</span>` : ''}</div>
+    ${a ? `<div class="rec-stats">
+      <div class="rs-main"><div class="rs-l">${esc(a.name)}</div><div class="rs-v" id="rs-time">${fmtDur(a.moving)}</div></div>
       <div class="rs-grid">
-        <div><div class="rs-l">Distância</div><div class="rs-v">${fmtDist(an.dist)} <small>${distUnit()}</small></div></div>
-        <div><div class="rs-l">${usesPace(r.sport) ? 'Ritmo atual' : 'Velocidade'}</div><div class="rs-v">${usesPace(r.sport) ? fmtPace(lastSpd[0], lastSpd[1]) : fmtSpeed(lastSpd[0], lastSpd[1])} <small>${usesPace(r.sport) ? '/' + distUnit() : 'km/h'}</small></div></div>
-        <div><div class="rs-l">${usesPace(r.sport) ? 'Ritmo médio' : 'Média'}</div><div class="rs-v">${an.dist ? (usesPace(r.sport) ? fmtPace(an.dist, an.moving) : fmtSpeed(an.dist, an.moving)) : '–'}</div></div>
-        <div><div class="rs-l">Desnível</div><div class="rs-v">${fmtElev(an.gain || 0)} <small>${elevUnit()}</small></div></div>
-        ${r.track.length && r.track[r.track.length - 1][4] ? `<div><div class="rs-l">FC</div><div class="rs-v">${r.track[r.track.length - 1][4]} <small>bpm</small></div></div>` : ''}
-        <div><div class="rs-l">Voltas</div><div class="rs-v">${r.laps.length + 1}</div></div>
+        ${metric('Distância', fmtDist(a.dist), distUnit())}
+        ${metric(usesPace(a.sport) ? 'Ritmo atual' : 'Velocidade', usesPace(a.sport) ? fmtPace(1000, pace) : (pace ? NF1.format(3600 / pace) : '–'), usesPace(a.sport) ? '/' + distUnit() : 'km/h')}
+        ${metric('Ritmo médio', a.dist > 20 ? fmtPace(a.dist, a.moving) : '–', '/' + distUnit())}
+        ${metric('Desnível', fmtElev(actStats ? actStats.gain : 0), elevUnit())}
+        ${metric('FC', r.hrLive || '–', r.hrLive ? 'bpm' : '')}
+        ${metric('Cadência', r.cad || '–', r.cad ? 'ppm' : '')}
+      </div></div>
+      <div class="rec-ctl">
+        ${!a.paused ? `<button class="btn btn-secondary btn-round" data-act="recLap" aria-label="Marcar volta">${icon('lap', 24)}<span>Volta</span></button><button class="btn btn-primary btn-round xl" data-act="recPause" aria-label="Pausar">${icon('pause', 30)}</button><span class="btn-round ghost"></span>`
+        : `<button class="btn btn-secondary btn-round" data-act="recResume" aria-label="Retomar">${icon('play', 24)}<span>Retomar</span></button><button class="btn btn-danger btn-round xl" data-act="actFinish" aria-label="Terminar atividade">${icon('stop', 28)}</button><button class="btn btn-ghost btn-round" data-act="actDiscardAsk" aria-label="Descartar atividade">${icon('trash', 22)}<span>Descartar</span></button>`}
       </div>
-    </div>
-    <div class="rec-ctl">
-      ${r.state === 'recording' ? `<button class="btn btn-secondary btn-round" data-act="recLap" aria-label="Marcar volta">${icon('lap', 24)}<span>Volta</span></button><button class="btn btn-primary btn-round xl" data-act="recPause" aria-label="Pausar">${icon('pause', 30)}</button><span class="btn-round ghost"></span>`
-      : `<button class="btn btn-secondary btn-round" data-act="recResume" aria-label="Retomar">${icon('play', 24)}<span>Retomar</span></button><button class="btn btn-danger btn-round xl" data-act="recFinish" aria-label="Terminar">${icon('stop', 28)}</button><button class="btn btn-ghost btn-round" data-act="recDiscardAsk" aria-label="Descartar">${icon('trash', 22)}<span>Descartar</span></button>`}
-    </div>
+      <p class="center muted xs">${a.paused ? 'Terminar guarda a atividade e a sessão continua.' : 'Pausa para terminar a atividade.'}</p>`
+    : `<section class="card"><div class="rs-grid three">${metric('Tempo de sessão', `<span id="rs-time">${fmtDur(sessT)}</span>`)}${metric('Distância', fmtDist(r.sessDist), distUnit())}${metric('FC', r.hrLive || '–', r.hrLive ? 'bpm' : '')}</div></section>
+      <section class="card form"><h3 class="h-sm">Próxima atividade</h3>
+        <div class="sport-pick sm">${Object.entries(SPORTS).filter(([, v]) => v.gps).map(([k, v]) => `<button class="sp ${r.sport === k ? 'on' : ''}" ${act('recSport', { s: k })} aria-pressed="${r.sport === k}" style="--sc:${v.color}">${icon(v.icon, 22)}<span>${v.label}</span></button>`).join('')}</div>
+        <div class="seg-ctl" role="radiogroup" aria-label="Tipo de atividade"><label><input type="radio" name="kind" ${r.kind === 'treino' ? 'checked' : ''} ${act('recKind', { k: 'treino' })}><span>Treino</span></label><label><input type="radio" name="kind" ${r.kind === 'prova' ? 'checked' : ''} ${act('recKind', { k: 'prova' })}><span>Prova</span></label></div>
+        <div class="form-grid"><label class="fld"><span>Nome</span><input id="act-name" value="${esc(r.actName)}" maxlength="80" placeholder="${r.kind === 'prova' ? 'Ex.: Corrida da Ribeira 10K' : 'Ex.: Séries 6 × 1 km'}" data-change="actName"></label>
+        ${r.kind === 'prova' ? `<label class="fld"><span>Percurso da prova</span><select id="act-course" data-change="actCourse"><option value="">Sem percurso</option>${courseOptions().map(([k, l]) => `<option value="${k}" ${r.courseKey === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` : ''}</div>
+        <button class="btn btn-primary btn-xl wide" data-act="actStart">${icon('play', 22)}Iniciar ${r.kind === 'prova' ? 'prova' : 'treino'}</button>
+      </section>`}
+    ${sharePanel()}
+    <div class="row-gap center-row"><button class="btn btn-secondary" data-act="sessionFinishAsk">${icon('stop', 18)}Terminar sessão</button><button class="btn btn-ghost danger" data-act="recDiscardAsk">Descartar sessão</button></div>
     ${R.confirm ? `<div class="confirm card" role="alertdialog"><p>${R.confirm.text}</p><div><button class="btn btn-secondary btn-sm" data-act="confirmNo">Cancelar</button><button class="btn btn-danger btn-sm" data-act="confirmYes">${R.confirm.yes}</button></div></div>` : ''}
   </div>`;
 }
@@ -535,6 +578,7 @@ function viewProfile() {
     </div>
     ${fam === 'run' && bestRun.length ? `<section class="card"><div class="card-h"><h3>Recordes pessoais</h3></div><div class="pr-grid">${bestRun.map((b) => `<button class="pr-cell" ${go('activity', { id: b.aid })}><span class="muted xs up">${b.label}</span><b class="num">${fmtDur(b.time)}</b></button>`).join('')}</div></section>` : ''}
     <section class="card"><div class="card-h"><h3>Vitrine de troféus</h3><span class="muted sm">${trophies.length}</span></div>${trophies.length ? `<div class="trophies">${trophies.map((c) => `<button class="trophy" ${go('challenge', { id: c.id })}><span class="ch-badge">${icon('medal', 26)}</span><span class="xs">${esc(c.name)}</span></button>`).join('')}</div>` : '<p class="muted sm">Completa desafios para ganhar medalhas.</p>'}</section>
+    ${mine && DB.sessions.length ? `<section class="card"><div class="card-h"><h3>Sessões</h3><span class="muted sm">${DB.sessions.length}</span></div>${DB.sessions.slice(0, 4).map((x) => `<button class="row-btn" ${go('session', { id: x.id })}>${icon('route', 18)}<span class="grow left">${esc(x.title)} <span class="muted sm">· ${DTF_SHORT.format(x.start)}</span></span></button>`).join('')}</section>` : ''}
     <h3 class="sec-h">Atividades</h3>
     ${acts.length ? acts.slice(0, R.profLimit || 8).map(activityCard).join('') + (acts.length > (R.profLimit || 8) ? `<button class="btn btn-secondary wide" data-act="profMore">Ver mais</button>` : '') : empty('Sem atividades', mine ? 'Grava a primeira.' : 'Este atleta ainda não tem atividades visíveis.')}`;
 }
@@ -550,8 +594,9 @@ function viewTraining() {
   let body = '';
   if (tab === 'calendar') body = trainingCalendar();
   else if (tab === 'fitness') body = pro() ? trainingFitness() : proLock('Forma e frescura');
+  else if (tab === 'steps') body = trainingSteps();
   else body = trainingGoals();
-  return `${pageHead('Treino', '', '', false)}${tabs([['calendar', 'Diário'], ['fitness', 'Forma e frescura'], ['goals', 'Objetivos']], tab, 'trainTab')}${body}`;
+  return `${pageHead('Treino', '', '', false)}${tabs([['calendar', 'Diário'], ['fitness', 'Forma e frescura'], ['steps', 'Passos'], ['goals', 'Objetivos']], tab, 'trainTab')}${body}`;
 }
 function trainingCalendar() {
   const base = new Date(R.calMonth || startOfMonth(Date.now())), y = base.getFullYear(), m = base.getMonth();
@@ -607,7 +652,7 @@ function viewGroups() {
     const cur = DB.challenges.filter((c) => c.to > Date.now()), past = DB.challenges.filter((c) => c.to <= Date.now() && joined(c.id));
     body = `<div class="ch-grid">${cur.map(challengeCard).join('')}</div>${past.length ? `<h3 class="sec-h">Terminados</h3><div class="ch-grid">${past.map(challengeCard).join('')}</div>` : ''}`;
   }
-  return `${pageHead('Grupos', '', '', false)}${tabs([['clubs', 'Clubes'], ['challenges', 'Desafios']], tab, 'groupTab')}${body}`;
+  return `${pageHead('Grupos', '', `<div class="ph-r"><button class="btn btn-secondary btn-sm" ${go('race')}>${icon('groups', 16)}Seguir uma prova</button></div>`, false)}${tabs([['clubs', 'Clubes'], ['challenges', 'Desafios']], tab, 'groupTab')}${body}`;
 }
 function clubCard(c) {
   const m = c.members.includes(me());
@@ -656,12 +701,15 @@ function viewGear() {
   const list = gearOf(me());
   return `${pageHead('Equipamento')}${['shoe', 'bike'].map((k) => `<h3 class="sec-h">${k === 'shoe' ? 'Sapatilhas' : 'Bicicletas'}</h3><section class="card">${list.filter((g) => g.kind === k).map((g) => {
     const km = gearKm(g), alert = g.alertKm && km / 1000 >= g.alertKm * 0.9 && !g.retired;
-    return `<div class="gear-row ${g.retired ? 'retired' : ''}"><span class="gear-ic">${icon(k === 'shoe' ? 'shoe' : 'bike', 22)}</span><div class="grow"><b>${esc(g.name)}</b>${g.retired ? ' <span class="pill pill-soft">Reformado</span>' : ''}${g.defaultFor ? ` <span class="pill pill-soft">Por omissão: ${SPORTS[g.defaultFor].label}</span>` : ''}<div class="muted sm">${esc(g.brand || '')}</div>${g.alertKm ? `<div class="bar ${alert ? 'warn' : ''}"><i style="width:${clamp(km / 1000 / g.alertKm * 100, 0, 100).toFixed(0)}%"></i></div>` : ''}${alert ? `<div class="warn-t sm">Está perto dos ${fmtDistU(g.alertKm * 1000, 0)} que definiste. Pensa em trocar.</div>` : ''}</div><div class="right"><b class="num">${fmtDistU(km, 0)}</b><button class="link sm" ${act('retire', { id: g.id })}>${g.retired ? 'Reativar' : 'Reformar'}</button></div></div>`;
+    return `<div class="gear-row ${g.retired ? 'retired' : ''}">${g.photo ? `<img src="${g.photo}" alt="" class="gear-ic">` : `<span class="gear-ic">${icon(k === 'shoe' ? 'shoe' : 'bike', 22)}</span>`}<div class="grow"><button class="link strong" ${go('gearDetail', { id: g.id })}>${esc(g.name)}</button>${g.type ? ` <span class="muted sm">· ${esc(g.type)}${g.drop != null && g.drop !== '' ? ' · drop ' + g.drop + ' mm' : ''}${g.weight ? ' · ' + g.weight + ' g' : ''}</span>` : ''}${g.retired ? ' <span class="pill pill-soft">Reformado</span>' : ''}${g.defaultFor ? ` <span class="pill pill-soft">Por omissão: ${SPORTS[g.defaultFor].label}</span>` : ''}<div class="muted sm">${esc(g.brand || '')}</div>${g.alertKm ? `<div class="bar ${alert ? 'warn' : ''}"><i style="width:${clamp(km / 1000 / g.alertKm * 100, 0, 100).toFixed(0)}%"></i></div>` : ''}${alert ? `<div class="warn-t sm">Está perto dos ${fmtDistU(g.alertKm * 1000, 0)} que definiste. Pensa em trocar.</div>` : ''}</div><div class="right"><b class="num">${fmtDistU(km, 0)}</b><button class="link sm" ${act('retire', { id: g.id })}>${g.retired ? 'Reativar' : 'Reformar'}</button></div></div>`;
   }).join('') || '<p class="muted sm">Nada aqui ainda.</p>'}</section>`).join('')}
   <form class="card form" data-form="gear"><h3 class="h-sm">Adicionar equipamento</h3><div class="form-grid">
     <label class="fld"><span>Tipo</span><select id="gr-kind" name="kind"><option value="shoe">Sapatilhas</option><option value="bike">Bicicleta</option></select></label>
     <label class="fld"><span>Nome</span><input id="gr-name" name="name" required maxlength="60" placeholder="Ex.: Sapatilhas de prova"></label>
     <label class="fld"><span>Marca e modelo</span><input id="gr-brand" name="brand" maxlength="60"></label>
+    <label class="fld"><span>Tipo</span><select id="gr-type" name="type">${['Estrada', 'Trail', 'Competição', 'Pista', 'Caminhada', 'Bicicleta'].map((t) => `<option>${t}</option>`).join('')}</select></label>
+    <label class="fld"><span>Drop (mm)</span><input id="gr-drop" name="drop" type="number" min="0" max="16"></label>
+    <label class="fld"><span>Peso (g)</span><input id="gr-weight" name="weight" type="number" min="0"></label>
     <label class="fld"><span>Avisar aos (${distUnit()})</span><input id="gr-alert" name="alert" type="number" min="0" placeholder="700"></label>
     <label class="fld"><span>Usar por omissão em</span><select id="gr-def" name="defaultFor"><option value="">Nenhum</option><option value="run">Corrida</option><option value="trail_run">Trail</option><option value="ride">Bicicleta</option><option value="walk">Caminhada</option></select></label>
   </div><div class="form-actions"><button class="btn btn-primary">Adicionar</button></div></form>`;
@@ -706,6 +754,7 @@ function viewSettings() {
       <label class="fld"><span>Raio: ${fmtDistU(z.radius, 1)}</span><input type="range" id="s-radius" min="200" max="1600" step="100" value="${z.radius}" data-change="zoneR"></label>
       ${mapSVG({ lines: activitiesOf(me()).filter((a) => trackOf(a)).slice(0, 6).map((a) => ({ xy: xyOf(a), w: 2.4, noHalo: true, cls: 'm-faint' })), markers: [{ kind: 'zone', xy: [z.x, z.y], radius: z.radius }], w: 700, h: 240, bbox: [z.x - 2400, z.y - 900, z.x + 2400, z.y + 900] })}
     </section>
+    ${settingsConnections()}
     <section class="card form"><h3 class="h-sm">Plano</h3>
       <div class="plans"><div class="plan ${!st.pro ? 'on' : ''}"><b>Gratuito</b><span class="muted sm">Gravar, feed, kudos, segmentos, clubes, desafios, rotas.</span></div><div class="plan ${st.pro ? 'on' : ''}"><b>Pro</b><span class="muted sm">Forma e frescura, filtros nas classificações, heatmap, atividades no mesmo percurso, localização em direto, objetivos ilimitados.</span></div></div>
       <label class="switch"><input type="checkbox" id="s-pro" ${st.pro ? 'checked' : ''} data-change="pro"><span></span>Plano Pro ativo (demonstração, sem pagamento)</label></section>

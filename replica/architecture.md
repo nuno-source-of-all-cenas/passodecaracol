@@ -59,3 +59,20 @@ Jobs: `analyze_activity` (on insert: stats, parciais, melhores esforços, segmen
 3. Backend: Supabase (schema.sql), auth, storage, edge function de análise, Stripe.
 4. Mapas reais (MapLibre + OSM), PWA, depois Expo.
 5. As correções do /replica-entrepreneur e a personalização (nicho).
+
+## Funcionalidades próprias (v2, pedidas pelo Nuno)
+
+| funcionalidade | protótipo | produção |
+| --- | --- | --- |
+| Sessão (nível 1) com atividades (nível 2) | gravador por sessão; atividades guardadas dentro dela; sessão retomável | tabelas `sessions` e `activities.session_id`; o relógio grava a sessão e marca o início/fim das atividades |
+| Partilha ao vivo antes de começar | presence em tempo real da app publicada (4 KB por atleta, a cada 2 s) | Supabase Realtime (canal por `share_id`), página pública `/ao-vivo/:share_id` sem login, link com expiração |
+| WhatsApp | link `wa.me` com o URL | idem, com pré-visualização Open Graph do mapa |
+| Música | demo | Spotify Web API `currently-playing` com OAuth do atleta; Android: MediaSession; iOS: só Apple Music via MusicKit |
+| Clipe de 3 s a cada 500 m | câmara do navegador quando permitida, senão imagem gerada | app nativa com câmara traseira (Android permite em serviço em primeiro plano; iOS não grava com o ecrã bloqueado: avisar), upload para Storage, URL assinado no canal |
+| Fotos oficiais e certificados | ficheiros no próprio browser | Supabase Storage, `activity_files (kind: photo|certificate)` |
+| Exportar CSV | resumo, parciais, pontos GPS, todas as atividades | idem + ZIP com fotos e certificados |
+| Sapatilhas | ficha completa, custo por km, vida útil | colunas extra em `gear` |
+| Passos (Samsung Health) | demo e importação CSV | Android: Health Connect (o Samsung Health sincroniza para lá); iOS: HealthKit |
+| Seguir vários atletas numa prova | simulação + atletas reais que estejam a partilhar | canal por prova; lista de `share_id` subscritos |
+
+Riscos: bateria (GPS + câmara + rede), dados móveis dos vídeos (comprimir, só Wi-Fi opcional), privacidade (a partilha mostra a posição exata: expiração automática e zona de privacidade no início).

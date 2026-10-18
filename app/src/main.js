@@ -7,8 +7,9 @@ const VIEWS = {
   explore: viewExplore, segment: viewSegment, routeBuilder: viewRouteBuilder, profile: viewProfile, follows: viewFollows,
   training: viewTraining, groups: viewGroups, club: viewClub, challenge: viewChallenge, gear: viewGear,
   notifications: viewNotifications, search: viewSearch, settings: viewSettings,
+  live: viewLive, race: viewRace, session: viewSession, gearDetail: viewGearDetail,
 };
-const TITLES = { feed: 'Painel', record: 'Gravar', explore: 'Explorar', training: 'Treino', groups: 'Grupos', settings: 'Definições', notifications: 'Notificações', search: 'Procurar', gear: 'Equipamento', upload: 'Adicionar atividade' };
+const TITLES = { feed: 'Painel', record: 'Gravar', explore: 'Explorar', training: 'Treino', groups: 'Grupos', settings: 'Definições', notifications: 'Notificações', search: 'Procurar', gear: 'Equipamento', upload: 'Adicionar atividade', live: 'Ao vivo', race: 'Seguir prova' };
 const root = () => document.getElementById('app');
 
 function render() {
@@ -31,13 +32,22 @@ function navigate(view, params = {}, push = true) {
   if (push) R.stack.push({ view: R.view, params: R.params });
   if (R.stack.length > 40) R.stack.shift();
   Object.assign(R, { view, params, confirm: null, hlSeg: null, uploadErr: null });
-  if (view !== 'edit') R.draftPhotos = null;
+  if (view !== 'edit') { R.draftPhotos = null; R.draftRace = null; }
+  if (view !== 'live') R.clip = null;
   if (view === 'routeBuilder') rbOpen(params.id);
   if (view === 'notifications') setTimeout(() => { markNotificationsRead(); refreshChrome(); }, 1500);
   render();
   window.scrollTo(0, 0);
   if (params.focus === 'comment') setTimeout(() => { const c = document.getElementById('comment-in'); if (c) { c.scrollIntoView({ block: 'center' }); c.focus(); } }, 30);
 }
+function redrawRace() {
+  const pr = document.getElementById('race-photo-row'), cr = document.getElementById('race-cert-row'); if (!pr || !cr) return;
+  pr.querySelectorAll('.ph').forEach((n) => n.remove()); const addP = pr.querySelector('.ph-add');
+  R.draftRace.photos.forEach((p, i) => { const s = document.createElement('span'); s.className = 'ph'; s.innerHTML = `<img src="${p}" alt=""><button type="button" class="icon-btn sm" ${act('rmRacePhoto', { i })} aria-label="Remover foto">${icon('close', 14)}</button>`; pr.insertBefore(s, addP); });
+  cr.querySelectorAll('.cert-chip').forEach((n) => n.remove()); const addC = cr.querySelector('.file-btn');
+  R.draftRace.certs.forEach((c, i) => { const s = document.createElement('span'); s.className = 'cert-chip'; s.innerHTML = `${icon('medal', 14)}${esc(c.name)}<button type="button" class="icon-btn sm" ${act('rmCert', { i })} aria-label="Remover">${icon('close', 12)}</button>`; cr.insertBefore(s, addC); });
+}
+function parseDur(v) { if (!v) return null; const p = String(v).split(':').map(Number); if (p.some(isNaN)) return null; return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p.length === 2 ? p[0] * 60 + p[1] : p[0]; }
 function back() { const p = R.stack.pop(); if (p) navigate(p.view, p.params, false); else navigate('feed', {}, false); }
 
 function toast(msg) {
@@ -67,86 +77,169 @@ function redrawPhotos() {
   arr.forEach((p, i) => { const s = document.createElement('span'); s.className = 'ph'; s.innerHTML = `<img src="${p}" alt=""><button type="button" class="icon-btn sm" ${act('rmPhoto', { i })} aria-label="Remover foto">${icon('close', 14)}</button>`; row.insertBefore(s, add); });
 }
 
-/* ---------- recorder ---------- */
-const REC = { state: 'idle', sport: 'run', source: 'sim', speed: 10, routeId: '', routePts: null, track: [], laps: [], start: 0, elapsedMoving: 0, pending: null, beacon: false, beaconId: '' };
-let recTimer = 0, lastRender = 0;
+/* ---------- recorder: a session (level 1) holds one or more activities (level 2) ---------- */
+const REC = { state: 'idle', sport: 'run', kind: 'treino', actName: '', courseKey: '', course: null, source: 'sim', speed: 10, routeId: '',
+  routePts: null, track: [], start: 0, act: null, acts: [], ranges: [], pending: null, shareId: '', sessDist: 0, clipList: [], song: null, cad: 0, hrLive: 0, hrDevice: '' };
+let recTimer = 0, lastRender = 0, camStream = null;
 
-function recStart() {
-  Object.assign(REC, { state: 'recording', track: [], laps: [], start: Date.now(), elapsedMoving: 0, autoPaused: false, gpsOk: false });
-  REC.beaconId = Math.random().toString(36).slice(2, 8);
+function sessionStart(withActivity) {
+  Object.assign(REC, { state: 'session', track: [], start: Date.now(), act: null, acts: [], ranges: [], sessDist: 0, clipList: [], gpsOk: false,
+    shareId: Math.random().toString(36).slice(2, 8), sessionId: uid('ss'), song: DB.settings.conn.spotify ? PLAYLIST[Math.floor(Math.random() * PLAYLIST.length)] : null });
   if (REC.source === 'gps') {
     if (!navigator.geolocation) { toast('Este navegador não dá acesso à localização. A usar o simulador.'); REC.source = 'sim'; }
     else {
       REC.watchId = navigator.geolocation.watchPosition((pos) => {
         REC.gpsOk = true;
-        if (REC.state !== 'recording') return;
+        if (REC.act && REC.act.paused) return;
         const t = Math.round((Date.now() - REC.start) / 1000);
-        const p = [+pos.coords.latitude.toFixed(6), +pos.coords.longitude.toFixed(6), +(pos.coords.altitude || 0).toFixed(1), t, 0];
+        const p = [+pos.coords.latitude.toFixed(6), +pos.coords.longitude.toFixed(6), +(pos.coords.altitude || 0).toFixed(1), t, REC.hrLive || 0];
         const last = REC.track[REC.track.length - 1];
         if (last && haversine(last[0], last[1], p[0], p[1]) < 2) return;
-        REC.track.push(p);
+        pushPoint(p);
       }, (err) => {
         toast(err.code === 1 ? 'Sem autorização para usar a localização. A usar o simulador.' : 'Sem sinal de GPS. A usar o simulador.');
         navigator.geolocation.clearWatch(REC.watchId); REC.source = 'sim'; simInit();
       }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+      if (DB.settings.live.clips && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 640 }, audio: false }).then((s) => { camStream = s; }).catch(() => { camStream = null; });
+      }
     }
   }
   if (REC.source === 'sim') simInit();
   clearInterval(recTimer);
   recTimer = setInterval(recTick, 250);
   try { navigator.wakeLock && navigator.wakeLock.request('screen').catch(() => { }); } catch (e) { }
-  render();
+  if (withActivity) actStart(); else { toast(DB.settings.live.share ? 'Sessão iniciada e partilhada.' : 'Sessão iniciada.'); render(); }
+  publishLive(true);
+}
+function pushPoint(p) {
+  const last = REC.track[REC.track.length - 1];
+  if (last) {
+    const d = haversine(last[0], last[1], p[0], p[1]);
+    REC.sessDist += d;
+    if (REC.act && !REC.act.paused) {
+      REC.act.dist += d;
+      if (REC.act.dist >= REC.act.nextClip) { recordClip(p); REC.act.nextClip += 500; }
+    }
+    const dt = p[3] - last[3];
+    if (dt > 0) { const v = d / dt; REC.cad = v > 0.6 ? Math.round(sportFamily(REC.act ? REC.act.sport : 'run') === 'run' ? clamp(150 + (v - 2.5) * 14, 150, 190) : clamp(100 + (v - 1.2) * 30, 95, 125)) : 0; }
+  }
+  REC.track.push(p);
+}
+function recordClip(p) {
+  if (!DB.settings.live.clips) return;
+  const [x, y] = toXY(p[0], p[1]), c = { km: +(REC.act.dist / 1000).toFixed(1), x, y, url: '' };
+  REC.clipList.push(c);
+  if (camStream) {
+    try {
+      const rec = new MediaRecorder(camStream), chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => { c.url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'video/webm' })); };
+      rec.start(); setTimeout(() => rec.state !== 'inactive' && rec.stop(), 3000);
+    } catch (e) { /* keep the generated frame */ }
+  }
 }
 function simInit() {
   const r = REC.routeId && DB.routes.find((x) => x.id === REC.routeId);
-  const pts = r ? (r.pts.length > 1 ? r.pts : null) : BASE_ROUTES[(ROUTES_BY_SPORT[REC.sport] || ['ribeira'])[0]].pts;
-  REC.routePts = densify(pts || BASE_ROUTES.ribeira.pts, 20);
-  REC.sim = { w: makeWalker(densify(pts || BASE_ROUTES.ribeira.pts, 5)), s: 0, t: 0, lastPt: -99, hr: 90, noise: 0, stopUntil: 0, rnd: mulberry32(Date.now() & 0xffffffff), ox: 0, oy: 0 };
+  const pts = r && r.pts.length > 1 ? r.pts : (BASE_ROUTES[(ROUTES_BY_SPORT[REC.sport] || ['ribeira'])[0]] || BASE_ROUTES.ribeira).pts;
+  REC.routePts = densify(pts, 20);
+  REC.sim = { pts, w: makeWalker(densify(pts, 5)), s: 0, t: 0, lastPt: -99, hr: 90, noise: 0, stopUntil: 0, rnd: mulberry32(Date.now() & 0xffffffff), ox: 0, oy: 0, flip: false };
   REC.pos = REC.sim.w.at(0);
 }
+function simUseCourse(pts) {
+  // a race: walk the runner to the start of the course, then follow it
+  const sim = REC.sim, here = sim.w.at(sim.s);
+  const path = [[here[0], here[1]], ...pts];
+  sim.pts = path; sim.w = makeWalker(densify(path, 5)); sim.s = 0;
+  REC.routePts = densify(pts, 20);
+}
 function recTick() {
-  if (REC.state !== 'recording') return;
+  if (REC.state === 'idle') return;
+  const a = REC.act;
   if (REC.source === 'sim') {
-    const sim = REC.sim, dt = 0.25 * REC.speed, base = (BASE_SPEED[REC.sport] || 3) * 1.03;
+    const sim = REC.sim, dt = 0.25 * REC.speed;
+    const sp = a ? a.sport : REC.sport;
+    const base = a ? (BASE_SPEED[sp] || 3) * 1.03 : (BASE_SPEED[sp] || 3) * (sp === 'ride' ? 0.5 : 0.55);
     let left = dt;
     while (left > 0) {
       const step = Math.min(1, left); left -= step; sim.t += step;
-      if (sim.t > sim.stopUntil && sim.rnd() < 0.0015 * step) sim.stopUntil = sim.t + 15 + sim.rnd() * 20;   // a red light
-      const stopped = sim.t < sim.stopUntil;
+      if (sim.t > sim.stopUntil && sim.rnd() < (a ? 0.0015 : 0.004) * step) sim.stopUntil = sim.t + 15 + sim.rnd() * (a ? 20 : 60);
+      const stopped = sim.t < sim.stopUntil || (a && a.paused);
       const [x, y] = sim.w.at(sim.s), ah = sim.w.at(sim.s + 15), grade = (terrain(ah[0], ah[1]) - terrain(x, y)) / 15;
       sim.noise = sim.noise * 0.92 + (sim.rnd() - 0.5) * 0.05;
-      const v = stopped ? 0 : clamp(base * (1 + sim.noise) * (1 - (REC.sport === 'ride' ? 8 : 4) * grade), base * 0.4, base * 1.6);
+      const v = stopped ? 0 : clamp(base * (1 + sim.noise) * (1 - (sp === 'ride' ? 8 : 4) * grade), base * 0.4, base * 1.6);
       sim.s = Math.min(sim.w.total, sim.s + v * step);
       const moving = v > 0.3;
-      if (moving || !DB.settings.autopause) REC.elapsedMoving += step;
-      REC.autoPaused = !moving && DB.settings.autopause;
-      sim.hr += (60 + 110 * clamp(0.62 + 3 * grade + (moving ? 0.1 : -0.25), 0.3, 0.97) - sim.hr) * 0.05 * step;
+      if (a && !a.paused && (moving || !DB.settings.autopause)) a.moving += step;
+      if (a) a.autoPaused = !moving && !a.paused && DB.settings.autopause;
+      sim.hr += (60 + 110 * clamp((a ? 0.66 : 0.42) + 3 * grade + (moving ? 0.1 : -0.25), 0.3, 0.97) - sim.hr) * 0.05 * step;
+      REC.hrLive = Math.round(sim.hr);
       if (sim.t - sim.lastPt >= 3 && (moving || sim.t - sim.lastPt >= 15)) {
         sim.lastPt = sim.t;
         sim.ox = clamp(sim.ox * 0.85 + (sim.rnd() - 0.5) * 1.4, -3, 3); sim.oy = clamp(sim.oy * 0.85 + (sim.rnd() - 0.5) * 1.4, -3, 3);
         const [px, py] = sim.w.at(sim.s), ll = toLL(px + sim.ox, py + sim.oy);
-        REC.track.push([+ll[0].toFixed(6), +ll[1].toFixed(6), +terrain(px, py).toFixed(1), Math.round(sim.t), Math.round(sim.hr)]);
+        pushPoint([+ll[0].toFixed(6), +ll[1].toFixed(6), +terrain(px, py).toFixed(1), Math.round(sim.t), Math.round(sim.hr)]);
         REC.pos = [px, py];
       }
-      if (sim.s >= sim.w.total) { REC.state = 'paused'; toast('Chegaste ao fim da rota. Termina para guardar.'); break; }
+      if (sim.s >= sim.w.total) {
+        if (a && REC.course) { a.paused = true; toast('Chegaste à meta! Termina a atividade.'); break; }
+        sim.pts = sim.pts.slice().reverse(); sim.w = makeWalker(densify(sim.pts, 5)); sim.s = 0;     // keep moving: turn around
+      }
     }
+    if (DB.settings.conn.spotify && Math.floor(sim.t) % 200 < dt) REC.song = PLAYLIST[Math.floor(sim.rnd() * PLAYLIST.length)];
   } else {
-    REC.elapsedMoving = (Date.now() - REC.start) / 1000 - (REC.pausedFor || 0);
+    if (a && !a.paused) a.moving = (Date.now() - a.startedAt) / 1000 - (a.pausedFor || 0);
     if (REC.track.length) REC.pos = toXY(REC.track[REC.track.length - 1][0], REC.track[REC.track.length - 1][1]);
   }
+  publishLive();
+  if (Date.now() - (REC.savedAt || 0) > 10000) { REC.savedAt = Date.now(); try { localStorage.setItem('passo.rec', JSON.stringify({ at: Date.now(), track: REC.track.slice(-3000), start: REC.start, act: REC.act, acts: REC.acts, ranges: REC.ranges, sport: REC.sport })); } catch (e) { } }
   if (R.view === 'record' && Date.now() - lastRender > 480) { lastRender = Date.now(); render(); }
-  else if (R.view === 'record') { const t = document.getElementById('rs-time'); if (t) t.textContent = fmtDur(REC.elapsedMoving); }
+  else if (R.view === 'record') { const t = document.getElementById('rs-time'); if (t) t.textContent = fmtDur(a ? a.moving : (Date.now() - REC.start) / 1000 * (REC.source === 'sim' ? REC.speed : 1)); }
 }
-function recStop() { clearInterval(recTimer); if (REC.watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(REC.watchId); REC.watchId = null; }
-function recFinish() {
+function actStart() {
+  const course = REC.kind === 'prova' ? coursePts(REC.courseKey) : null;
+  REC.course = course;
+  REC.act = { startIdx: Math.max(0, REC.track.length - 1), startedAt: Date.now(), sport: REC.sport, kind: REC.kind, name: REC.actName || (REC.kind === 'prova' ? 'Prova' : SPORTS[REC.sport].verb), laps: [], paused: false, moving: 0, dist: 0, nextClip: 500 };
+  if (course && REC.source === 'sim') simUseCourse(course);
+  toast(REC.kind === 'prova' ? 'Boa prova! A atividade começou.' : 'A atividade começou.');
+  render(); publishLive(true);
+}
+function recStop() { clearInterval(recTimer); if (REC.watchId != null && navigator.geolocation) navigator.geolocation.clearWatch(REC.watchId); REC.watchId = null; if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; } }
+function actFinish(discard) {
+  const a = REC.act; if (!a) return;
+  REC.act = null; REC.course = null;
+  const pts = REC.track.slice(a.startIdx);
+  if (discard) { toast('Atividade descartada. A sessão continua.'); render(); return; }
+  if (pts.length < 2) { toast('A atividade é curta demais para guardar. A sessão continua.'); render(); return; }
+  const t0 = pts[0][3], g = gearOf(me()).find((x) => x.defaultFor === a.sport && !x.retired);
+  const act0 = createActivity({ sport: a.sport, kind: a.kind, name: a.name, desc: '', start: REC.start + t0 * 1000, track: pts.map((p) => [p[0], p[1], p[2], p[3] - t0, p[4]]),
+    laps: a.laps.map((i) => i - a.startIdx).filter((i) => i > 0), visibility: DB.settings.defaultVisibility, gearId: g ? g.id : null, rpe: null, photos: [], hideStats: {},
+    sessionId: REC.sessionId, race: a.kind === 'prova' ? { name: a.name, photos: [], certs: [] } : undefined, steps: undefined });
+  REC.acts.push(act0.id);
+  REC.ranges.push({ kind: 'activity', aid: act0.id, i0: a.startIdx, i1: REC.track.length - 1, label: a.name });
+  toast('Atividade guardada na sessão. Podes começar outra.');
+  render(); publishLive(true);
+}
+function sessionFinish() {
+  if (REC.act) actFinish(false);
   recStop();
-  if (REC.track.length < 2) { REC.state = 'idle'; toast('A gravação é curta demais para guardar.'); render(); return; }
-  const h = new Date(REC.start).getHours(), part = h < 12 ? 'da manhã' : h < 20 ? 'da tarde' : 'da noite';
-  const g = gearOf(me()).find((x) => x.defaultFor === REC.sport && !x.retired);
-  REC.pending = { sport: REC.sport, track: REC.track, start: REC.start, laps: REC.laps.slice(), name: `${SPORTS[REC.sport].verb} ${part}`, desc: '', visibility: DB.settings.defaultVisibility, gearId: g ? g.id : null, rpe: null, photos: [], hideStats: {}, v: Date.now() };
-  REC.state = 'idle';
-  navigate('save', {}, false);
+  try { localStorage.removeItem('passo.rec'); } catch (e) { }
+  const tr = REC.track;
+  if (tr.length < 2) { REC.state = 'idle'; toast('A sessão terminou sem pontos para guardar.'); publishLive(true); render(); return; }
+  // ranges between activities are transitions (warm-up, travel, cool-down)
+  const ranges = [], acts = REC.ranges.slice().sort((p, q) => p.i0 - q.i0);
+  let cur = 0;
+  acts.forEach((r, k) => { if (r.i0 > cur) ranges.push({ kind: k === 0 ? 'warmup' : 'transit', label: k === 0 ? 'Deslocação e aquecimento' : 'Transição', i0: cur, i1: r.i0 }); ranges.push(r); cur = r.i1; });
+  if (cur < tr.length - 1) ranges.push({ kind: acts.length ? 'cooldown' : 'warmup', label: acts.length ? 'Depois da atividade' : 'Sessão', i0: cur, i1: tr.length - 1 });
+  const step = Math.max(1, Math.floor(tr.length / 4000));
+  const sess = { id: REC.sessionId, uid: me(), title: acts.length ? 'Sessão: ' + acts.map((r) => r.label).join(' + ') : 'Sessão sem atividade', start: REC.start, shareId: DB.settings.live.share ? REC.shareId : '', track: step > 1 ? tr.filter((_, i) => i % step === 0) : tr, ranges: step > 1 ? ranges.map((r) => ({ ...r, i0: Math.floor(r.i0 / step), i1: Math.floor(r.i1 / step) })) : ranges };
+  DB.sessions.unshift(sess); save();
+  REC.state = 'idle'; REC.track = []; REC.act = null;
+  publishLive(true);
+  toast('Sessão terminada e guardada.');
+  navigate('session', { id: sess.id }, false);
 }
+function recFinish() { sessionFinish(); }
 
 /* ---------- route builder ---------- */
 const RB = { id: null, name: '', sport: 'run', wps: [], pts: [], snap: true, vb: [-2200, -1800, 4400, 2600] };
@@ -219,6 +312,7 @@ const ACTIONS = {
   kudos({ id }) { toggleKudos(id); render(); },
   follow({ id }) { const was = isFollowing(me(), id); toggleFollow(id); toast(was ? `Deixaste de seguir ${user(id).name}.` : `Agora segues ${user(id).name}.`); render(); },
   share({ id }) { copyText(`https://passo.app/a/${id}`); },
+  copyText({ t }) { copyText(t); },
   copy({ sel }) { const el = document.querySelector(sel); if (el) copyText('https://' + el.textContent); },
   asOthers() { R.asOthers = !R.asOthers; render(); },
   actTab({ tab }) { R.params = { ...R.params, tab }; R.hlSeg = null; render(); },
@@ -238,11 +332,33 @@ const ACTIONS = {
   uploadTab({ tab }) { R.params = { tab }; R.uploadErr = null; render(); },
   rmPhoto({ i }) { photoTarget().splice(i, 1); redrawPhotos(); },
   // recorder
-  recSport({ s }) { REC.sport = s; render(); },
-  recStart, recPause() { REC.state = 'paused'; REC.pauseAt = Date.now(); render(); },
-  recResume() { if (REC.sim && REC.sim.s >= REC.sim.w.total) { toast('A rota terminou. Carrega em terminar.'); return; } if (REC.pauseAt) REC.pausedFor = (REC.pausedFor || 0) + (Date.now() - REC.pauseAt) / 1000; REC.state = 'recording'; render(); },
-  recLap() { REC.laps.push(Math.max(0, REC.track.length - 1)); toast(`Volta ${REC.laps.length} marcada.`); render(); },
-  recFinish, recDiscardAsk() { ask('Descartar esta gravação? Não dá para desfazer.', 'Descartar', () => { recStop(); REC.state = 'idle'; REC.track = []; render(); }); },
+  recSport({ s }) { REC.sport = s; render(); }, recKind({ k }) { REC.kind = k; render(); },
+  sessionStart() { sessionStart(false); }, quickStart() { sessionStart(true); },
+  actStart() { const n = document.getElementById('act-name'); if (n) REC.actName = n.value.trim(); actStart(); },
+  recPause() { REC.act.paused = true; REC.act.pauseAt = Date.now(); render(); publishLive(true); },
+  recResume() { const a = REC.act; if (a.pauseAt) a.pausedFor = (a.pausedFor || 0) + (Date.now() - a.pauseAt) / 1000; a.paused = false; render(); publishLive(true); },
+  recLap() { REC.act.laps.push(Math.max(0, REC.track.length - 1)); toast(`Volta ${REC.act.laps.length} marcada.`); render(); },
+  actFinish() { actFinish(false); }, actDiscardAsk() { ask('Descartar esta atividade? A sessão continua a gravar.', 'Descartar', () => actFinish(true)); },
+  sessionFinishAsk() { ask(REC.act ? 'Terminar a sessão? A atividade em curso é guardada.' : 'Terminar a sessão?', 'Terminar', sessionFinish); },
+  recDiscardAsk() { ask('Descartar a sessão inteira? As atividades já guardadas ficam.', 'Descartar', () => { recStop(); REC.state = 'idle'; REC.track = []; REC.act = null; try { localStorage.removeItem('passo.rec'); } catch (e) { } publishLive(true); render(); }); },
+  liveSel({ id }) { R.liveSel = id; R.clip = null; render(); }, demoLive() { R.demoSpeed = 10; addSim({ uid: 'u1', course: BASE_ROUTES.prova10k.pts, ability: 1.12, actName: 'Corrida da Ribeira 10K', seed: 7, warmup: true }); ensureLiveTimer(); render(); },
+  simSpeed({ n }) { if (R.race) R.race.speed = n; else R.demoSpeed = n; render(); },
+  clip(p) { const own = REC.clipList.find((c) => c.x === Math.round(p.x) || (Math.abs(c.x - p.x) < 1 && Math.abs(c.y - p.y) < 1)); R.clip = { ...p, url: own && own.url ? own.url : '' }; render(); if (!R.clip.url) playClip(); },
+  clipClose() { R.clip = null; cancelAnimationFrame(_clipAnim); render(); },
+  raceEnd() { if (R.race) R.race.ids.forEach((id) => SIMS.delete(id)); R.race = null; render(); },
+  raceFocus({ id }) { R.liveSel = id; navigate('live'); },
+  async exportAct({ id, what }) { await exportActivity(activity(id), what); }, exportAll() { exportAll(); },
+  async certSave({ id, i }) { const c = activity(id).race.certs[i]; const bin = atob(c.data.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k); await saveFile(c.name, new Blob([u8], { type: c.type }), c.type); },
+  rmRacePhoto({ i }) { R.draftRace.photos.splice(i, 1); redrawRace(); }, rmCert({ i }) { R.draftRace.certs.splice(i, 1); redrawRace(); },
+  async hrConnect() {
+    if (!navigator.bluetooth) { toast('Este navegador não tem Bluetooth. Usa o Chrome no Android ou no computador.'); return; }
+    try {
+      const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: ['heart_rate'] }] });
+      const ch = await (await (await dev.gatt.connect()).getPrimaryService('heart_rate')).getCharacteristic('heart_rate_measurement');
+      ch.addEventListener('characteristicvaluechanged', (e) => { const v = e.target.value, f = v.getUint8(0); REC.hrLive = f & 1 ? v.getUint16(1, true) : v.getUint8(1); });
+      await ch.startNotifications(); REC.hrDevice = dev.name || 'Sensor'; toast('Sensor ligado: ' + REC.hrDevice); render();
+    } catch (e) { toast('Não foi possível ligar o sensor.'); }
+  },
   discardAsk() { ask('Descartar esta atividade sem guardar?', 'Descartar', () => { REC.pending = null; navigate('feed', {}, false); }); },
   deleteAsk({ id }) { ask('Apagar esta atividade, os kudos e os comentários? Não dá para desfazer.', 'Apagar', () => { deleteActivity(id); toast('Atividade apagada.'); R.stack = []; navigate('feed', {}, false); }); },
   resetAsk() { ask('Repor todos os dados de exemplo? Perdes o que gravaste nesta demo.', 'Repor', () => { resetDemo(); R.stack = []; toast('Dados de exemplo repostos.'); navigate('feed', {}, false); }); },
@@ -250,6 +366,8 @@ const ACTIONS = {
   confirmYes() { const c = R.confirm; R.confirm = null; c && c.fn(); if (!R.confirm) render(); },
   confirmNo() { R.confirm = null; render(); },
   recordRoute({ id }) { const r = DB.routes.find((x) => x.id === id); REC.routeId = id; REC.sport = r.sport; REC.source = 'sim'; navigate('record'); },
+  resumeRec() { const s = R.resumable; if (!s) return; Object.assign(REC, { track: s.track, start: s.start, act: s.act, acts: s.acts || [], ranges: s.ranges || [], sport: s.sport, source: 'sim', sessionId: uid('ss'), shareId: Math.random().toString(36).slice(2, 8), state: 'session', sessDist: 0, clipList: [] }); simInit(); clearInterval(recTimer); recTimer = setInterval(recTick, 250); R.resumable = null; navigate('record'); },
+  dropRec() { try { localStorage.removeItem('passo.rec'); } catch (e) { } R.resumable = null; render(); },
   async exportGpx({ id }) {
     const r = DB.routes.find((x) => x.id === id), gpx = toGPX(r.name, r.sport, densify(r.pts, 25)), filename = r.name.replace(/[^\w\-]+/g, '_') + '.gpx';
     try { const dl = window.claude && (await window.claude.use('downloads')); if (dl) { await dl.save({ filename, data: gpx }); return; } } catch (e) { if (e && e.code !== 'not_granted') { /* fall through */ } }
@@ -266,6 +384,33 @@ const ACTIONS = {
 
 const CHANGES = {
   recSrc(el) { REC.source = el.value; render(); }, recRoute(el) { REC.routeId = el.value; }, recSpeed(el) { REC.speed = +el.value; },
+  actCourse(el) { REC.courseKey = el.value; }, actName(el) { REC.actName = el.value; },
+  liveOpt(el) { DB.settings.live[el.dataset.k] = el.checked; save(); publishLive(true); render(); },
+  liveCourse(el) { R.liveCourse = el.value; render(); },
+  async liveGpx(el) { const f = el.files[0]; if (!f) return; try { const g = parseGPX(await f.text()); R.liveGpx = g.track.map((p) => toXY(p[0], p[1])); R.liveCourse = 'gpx'; toast('Percurso carregado.'); } catch (e) { toast(e.message); } render(); },
+  conn(el) {
+    const id = el.dataset.id; DB.settings.conn[id] = el.checked;
+    if (id === 'samsung') {
+      if (el.checked) { const r = mulberry32(99), today = startOfDay(Date.now()); for (let i = 0; i < 60; i++) { const t = today - i * 864e5, base = new Date(t).getDay() % 6 === 0 ? 6500 : 8200; const ex = DB.activities.filter((a) => a.uid === me() && startOfDay(a.start) === t).reduce((s, a) => s + ((activitySteps(a) || {}).steps || 0), 0); DB.steps[dayKey(t)] = Math.round(base + r() * 4200 + ex); } toast('Samsung Health ligado (dados de demonstração).'); }
+      else { DB.steps = {}; toast('Samsung Health desligado.'); }
+    }
+    save(); render();
+  },
+  async stepsCsv(el) {
+    const f = el.files[0]; if (!f) return; let n = 0;
+    (await f.text()).split(/\r?\n/).forEach((line) => { const m = line.match(/(\d{4}-\d{2}-\d{2})[^\d]+(\d+)/); if (m) { DB.steps[m[1]] = +m[2]; n++; } });
+    save(); toast(n ? `${n} dias de passos importados.` : 'Não encontrei linhas no formato data,passos.'); render();
+  },
+  async gearPhoto(el) { const f = el.files[0]; if (!f) return; try { saveGear({ id: el.dataset.id, photo: await resizeImage(f, 600) }); render(); } catch (e) { toast('Não foi possível ler essa imagem.'); } },
+  async racePhoto(el) { for (const f of [...el.files].slice(0, 12)) { try { R.draftRace.photos.push(await resizeImage(f, 1200)); } catch (e) { toast('Não foi possível ler uma das imagens.'); } } el.value = ''; redrawRace(); },
+  async raceCert(el) {
+    for (const f of [...el.files]) {
+      if (f.size > 1.5 * 1024 * 1024 && !f.type.startsWith('image/')) { toast(`${f.name} tem mais de 1,5 MB.`); continue; }
+      const data = f.type.startsWith('image/') ? await resizeImage(f, 1400) : await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(f); });
+      R.draftRace.certs.push({ name: f.name, type: f.type.startsWith('image/') ? 'image/jpeg' : f.type || 'application/pdf', data });
+    }
+    el.value = ''; redrawRace();
+  },
   autopause(el) { setSetting('autopause', el.checked); }, beacon(el) { REC.beacon = el.checked; REC.beaconId = REC.beaconId || Math.random().toString(36).slice(2, 8); render(); },
   async photo(el) {
     const files = [...el.files].slice(0, 6);
@@ -300,7 +445,9 @@ const FORMS = {
     navigate('activity', { id: a.id }, false);
   },
   edit(fd, form) {
-    updateActivity(form.dataset.id, { sport: fd.get('sport'), name: fd.get('name').trim(), desc: fd.get('desc').trim(), visibility: fd.get('visibility'), gearId: fd.get('gearId') || null, rpe: fd.get('rpe') ? +fd.get('rpe') : null, photos: R.draftPhotos || [], hideStats: { pace: !!fd.get('h_pace'), hr: !!fd.get('h_hr'), calories: !!fd.get('h_calories') } });
+    const isRace = !!fd.get('isRace'), num = (k) => (fd.get(k) ? +fd.get(k) : null);
+    const race = isRace ? { name: fd.get('r_name').trim(), bib: fd.get('r_bib').trim(), official: parseDur(fd.get('r_official')), pos: num('r_pos'), total: num('r_total'), cat: fd.get('r_cat').trim(), posCat: num('r_posCat'), url: fd.get('r_url').trim(), photos: R.draftRace.photos, certs: R.draftRace.certs } : undefined;
+    updateActivity(form.dataset.id, { kind: isRace ? 'prova' : 'treino', race, sport: fd.get('sport'), name: fd.get('name').trim(), desc: fd.get('desc').trim(), visibility: fd.get('visibility'), gearId: fd.get('gearId') || null, rpe: fd.get('rpe') ? +fd.get('rpe') : null, photos: R.draftPhotos || [], hideStats: { pace: !!fd.get('h_pace'), hr: !!fd.get('h_hr'), calories: !!fd.get('h_calories') } });
     toast('Alterações guardadas.'); R.stack.pop(); navigate('activity', { id: form.dataset.id }, false);
   },
   manual(fd) {
@@ -331,8 +478,20 @@ const FORMS = {
   },
   gear(fd) {
     const k = S.units === 'imperial' ? 1.609344 : 1;
-    saveGear({ kind: fd.get('kind'), name: fd.get('name').trim(), brand: fd.get('brand').trim(), alertKm: Math.round((+fd.get('alert') || 0) * k), defaultFor: fd.get('defaultFor'), retired: false });
+    saveGear({ kind: fd.get('kind'), name: fd.get('name').trim(), brand: fd.get('brand').trim(), type: fd.get('type'), drop: fd.get('drop') === '' ? null : +fd.get('drop'), weight: +fd.get('weight') || null, alertKm: Math.round((+fd.get('alert') || 0) * k), defaultFor: fd.get('defaultFor'), retired: false });
     toast('Equipamento adicionado.'); render();
+  },
+  gearEdit(fd, form) {
+    const k = S.units === 'imperial' ? 1.609344 : 1;
+    saveGear({ id: form.dataset.id, name: fd.get('name').trim(), brand: fd.get('brand').trim(), type: fd.get('type'), drop: fd.get('drop') === '' ? null : +fd.get('drop'), weight: +fd.get('weight') || null, purchased: fd.get('purchased'), price: +fd.get('price') || null, alertKm: Math.round((+fd.get('alert') || 0) * k), notes: fd.get('notes').trim() });
+    toast('Equipamento guardado.'); render();
+  },
+  race(fd) {
+    const key = fd.get('course'), course = coursePts(key), name = fd.get('name').trim() || 'Prova', runners = fd.getAll('runners');
+    if (!runners.length) { toast('Escolhe pelo menos um atleta.'); return; }
+    SIMS.clear();
+    R.race = { name, course: key, speed: 10, ids: runners.map((u, i) => addSim({ uid: u, course, ability: (user(u).ability || 1) * (0.94 + (hashStr(u + name) % 100) / 1000), actName: name, seed: 100 + i })) };
+    ensureLiveTimer(); render();
   },
   profile(fd) { updateMe({ name: fd.get('name').trim(), city: fd.get('city').trim(), sex: fd.get('sex'), bio: fd.get('bio').trim() }); toast('Perfil guardado.'); render(); },
 };
@@ -386,4 +545,8 @@ function bind() {
 
 load();
 bind();
+try { const s = JSON.parse(localStorage.getItem('passo.rec') || 'null'); if (s && s.track && s.track.length > 1 && Date.now() - s.at < 6 * 36e5) R.resumable = s; } catch (e) { }
+if (location.hash === '#aovivo') { R.view = 'live'; ensureLiveTimer(); }
 render();
+initRoom();
+window.addEventListener('hashchange', () => { if (location.hash === '#aovivo') navigate('live'); });

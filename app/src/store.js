@@ -8,7 +8,7 @@ let DB = null;
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const d = JSON.parse(raw); if (d && d.version === 3) DB = d; }
+    if (raw) { const d = JSON.parse(raw); if (d && d.version >= 3) DB = upgradeTo4(d); }
   } catch (e) { /* storage blocked: run from seed */ }
   if (!DB) DB = buildSeed();
   S.units = DB.settings.units;

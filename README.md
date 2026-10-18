@@ -9,7 +9,7 @@ replica/features.csv    matriz de funcionalidades (python3 ../replica-diff/parit
 replica/architecture.md stack, API, partes difíceis, ordem de build
 replica/schema.sql      primeira migração Postgres + PostGIS + RLS (Supabase)
 replica/build-log.md    estado por ecrã
-app/src/                a app (JS sem dependências)
+app/src/                a app (JS sem dependências; live.js = sessões ao vivo, provas, sapatilhas, passos)
 app/build.sh            gera app/dist/index.html (artifact) e app/dist/local.html (abrir no browser)
 ```
 
